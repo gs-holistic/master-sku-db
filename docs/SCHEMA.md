@@ -59,5 +59,6 @@ SELECT id, 11.50, '2026-11-01', 'manual', 1, 'PO-1234' FROM core.sku WHERE code 
 | `ops.import_run` | Each run: who, when, dry run or not, sources and their read dates, and a summary of changes |
 | `ops.exclusion` | Codes left out and why (Grenco Goods, Route, Printful, -10/-20 packs, dropped duplicate rows…) |
 | `ops.conflict` | Sources that disagree about a SKU field. Status: open, resolved, reopened (sources changed after a decision) or cleared (sources now agree). Costs never appear here. |
-| `ops.conflict_resolution` | Ken's decision for each conflict, reapplied on every import |
+| `ops.conflict_resolution` | Ken's decision for each conflict (typed in the outputs sheet or recorded with `msku resolve`), reapplied on every import |
+| `ops.source_fix` | Values in another system that differ from the trusted source, e.g. a Cin7 price tier vs the price list. The rule already decides these, so they're a to-do list, not conflicts. Status `open` or `fixed`. |
 | `ops.audit_log` | Who changed what, when, and the row before and after |

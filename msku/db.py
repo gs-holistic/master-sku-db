@@ -249,7 +249,23 @@ def _load(conn, m, run_id, read_at):
         for fp, status in existing.items():
             if fp not in m.conflicts and status != "cleared":
                 cur.execute("UPDATE ops.conflict SET status = 'cleared' WHERE fingerprint = %s", (fp,))
-    st["conflicts_open"] = sum(1 for fp in m.conflicts if fp not in resolutions or resolutions[fp][1] != m.conflicts[fp]["values_hash"])
+    # fix list: values elsewhere that differ from the trusted source; 'fixed' once they agree
+    seen_fix = set()
+    with conn.cursor() as cur:
+        for f in m.source_fixes:
+            seen_fix.add((f["code"], f["field"], f["source"]))
+            cur.execute("""INSERT INTO ops.source_fix (sku_code, field, source, source_value, correct_value, source_ref, correct_ref)
+                           VALUES (%s,%s,%s,%s,%s,%s,%s)
+                           ON CONFLICT (sku_code, field, source) DO UPDATE SET source_value = EXCLUDED.source_value,
+                             correct_value = EXCLUDED.correct_value, source_ref = EXCLUDED.source_ref,
+                             correct_ref = EXCLUDED.correct_ref, status = 'open', last_seen = current_date""",
+                        (f["code"], f["field"], f["source"], f["source_value"], f["correct_value"], f["source_ref"], f["correct_ref"]))
+        for key in conn.execute("SELECT sku_code, field, source FROM ops.source_fix WHERE status = 'open'").fetchall():
+            if tuple(key) not in seen_fix:
+                cur.execute("UPDATE ops.source_fix SET status = 'fixed' WHERE (sku_code, field, source) = (%s,%s,%s)", key)
+    st["source_fixes_open"] = len(seen_fix)
+
+    st["conflicts_open"] =sum(1 for fp in m.conflicts if fp not in resolutions or resolutions[fp][1] != m.conflicts[fp]["values_hash"])
     st["skus"] = len(m.skus)
     st["missing_cost_tier1"] = len(m.missing_cost)
     st["warnings"] = m.warnings

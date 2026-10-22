@@ -8,7 +8,7 @@ PRICE_HDR = [[], ["", "", "", "", "DOMESTIC"], ["", "", "WHOLESALE PRICE LIST"],
 def price_tab(rows, distro=False):
     out = copy.deepcopy(PRICE_HDR)
     for r in rows:
-        out.append(r if distro else r[:5])
+        out.append(list(r) if distro else r[:5])
     return out
 
 
@@ -24,8 +24,9 @@ def sources():
     for t in ("STG US WS", "STG US D", "STG CA WS", "STG CA D", "STG EU W", "STG EU D"):
         tabs[t] = price_tab(stg, distro=t.endswith(" D"))
     tabs["GP EU WS"][5][3] = "$99.95"          # $ typo on a EUR tab
+    tabs["GP CA D"][5][3] = "$129.95"          # WS and D tabs disagree on CA MSRP -> a real conflict
     tabs["GP/STG ORDER FORM"] = copy.deepcopy(PRICE_HDR) + [["", "GPM-001-APZZ", "Micro II", "$99.95", "$60.00", "1", "$60"]]
-    tabs["GP/STG EX-FACTORY UNIT COSTS"] = copy.deepcopy(PRICE_HDR) + [["", "GPM-001-APZZ", "Micro II", "$99.95", "$60.00", "$10.00"]]
+    tabs["GP/STG EX-FACTORY UNIT COSTS"] = copy.deepcopy(PRICE_HDR) + [["", "GPM-001-APZZ", "Micro II", "$99.95", "$60.00", "$13.37"]]
 
     gp_hdr = ["", "Full Name", "Product Cost (Per Unit)", "Landed Cost", "MSRP", "GNLN SKU", "Units Per Case", "Company CODE",
               "Product Code", "Accesory Name", "Brand & Color Code", "Country Code", "Active", "Product Class", "Company",
@@ -38,7 +39,7 @@ def sources():
         r[20], r[21] = "0.05", "18 x 18 x 90 mm"
         return r
     master_gp = [gp_hdr,
-                 gp("GPM-001-APZZ", "G Pen Micro II Vaporizer", cost="$12.00", active="Inactive"),
+                 gp("GPM-001-APZZ", "G Pen Micro II Vaporizer", cost="$12.34", active="Inactive"),
                  gp("GPD-002-AMGD", "DASH MOUTHPIECE - RED", color="BLU", upc_="811736027670"),
                  ["----"],
                  gp("GPX-999-ZZZZ", "Old thing", upc_="811736099999")]

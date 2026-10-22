@@ -25,6 +25,7 @@ class Model:
         self.stock = []
         self.exclusions = {}
         self.conflicts = {}
+        self.source_fixes = []    # Cin7 / master values that differ from the price list (price list wins)
         self.warnings = []
         self.staging = []         # (spreadsheet_id, spreadsheet, tab, row_num, row)
 
@@ -120,7 +121,7 @@ def _read_prices(m, doc):
                 amt = money(cell(r, col))
                 if amt is not None:
                     m.price_obs[(code, "US", tier)].append({"value": amt, "currency": "USD", "source": "Order form",
-                                                            "ref": f"row {i}", "kind": "compare"})
+                                                            "ref": f"row {i}", "kind": "order_form"})
 
     # ex-factory unit cost (confidential)
     for i, r in enumerate(doc["tabs"].get(R.EX_FACTORY_TAB, [])[R.PRICE_HEADER_ROWS:], start=R.PRICE_HEADER_ROWS + 1):
@@ -381,7 +382,9 @@ def _derive(m):
             m.conflict(code, "status_cin7", "Status", "Cin7 says DEPRECATED, but SKU is on the price list",
                        [{"value": "DEPRECATED", "source": "Cin7", "ref": ""}, {"value": "Tier 1", "source": "Price list", "ref": ""}])
 
-    # prices: Tier 1 rows load from the price list; every other observation is for comparison
+    # prices: Tier 1 rows load from the price list. Ken: the price list always beats Cin7 and the master
+    # sheet's MSRP, so those mismatches go on a fix list. Only disagreements inside the price-list
+    # workbook (WS tab vs D tab vs order form) are conflicts for Ken to decide.
     for (code, region, tier), obs in sorted(m.price_obs.items()):
         if code not in m.skus or not m.skus[code]["price_tabs"]:
             continue
@@ -392,10 +395,16 @@ def _derive(m):
         chosen = primary[0]
         m.prices.append({"code": code, "region": region, "tier": tier, "currency": chosen["currency"],
                          "amount": chosen["value"], "source": chosen["source"], "ref": chosen["ref"]})
-        if len({o["value"] for o in obs}) > 1:
+        workbook = [o for o in obs if o["kind"] in R.PRICE_LIST_KINDS]
+        if len({o["value"] for o in workbook}) > 1:
             m.conflict(code, f"price_{region}_{tier}", f"Price · {region} {tier}",
-                       f"Sources disagree (loaded {chosen['value']:,.2f} from {chosen['ref']} until decided)",
-                       [{"value": f"{o['value']:,.2f} {o['currency']}", "source": o["source"], "ref": o["ref"]} for o in obs])
+                       f"Price list tabs disagree (loaded {chosen['value']:,.2f} from {chosen['ref']} until decided)",
+                       [{"value": f"{o['value']:,.2f} {o['currency']}", "source": o["source"], "ref": o["ref"]} for o in workbook])
+        for o in obs:
+            if o["kind"] not in R.PRICE_LIST_KINDS and o["value"] != chosen["value"]:
+                m.source_fixes.append({"code": code, "field": f"{region} {tier}", "source": o["source"], "source_ref": o["ref"],
+                                       "source_value": f"{o['value']:,.2f}", "correct_value": f"{chosen['value']:,.2f} {chosen['currency']}",
+                                       "correct_ref": chosen["ref"]})
 
     # costs: drop ones for excluded or unknown codes
     m.costs = [c for c in m.costs if c["code"] in m.skus]

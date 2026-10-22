@@ -65,3 +65,9 @@
 - `SGM-DFK-GDAO-02`: the name is **"Grateful Dead x Modül + Dok Deluxe Travel Set - Legacy Patchwork"** (as on the price list).
 - **Cin7 PriceTier1/2/3 = US MSRP / Wholesale / Distribution** (confirmed).
 - **Schema proposal: approved.**
+
+## 2026-10-22: Price precedence and conflict workflow (from Ken)
+
+- **The price list always beats Cin7 and the master sheet's MSRP.** Those mismatches are no longer conflicts. They go on a **fix list** (`ops.source_fix`, and the "Fix list (other systems)" tab) for whoever maintains Cin7 / the master sheet. This cleared 56 of the 73 conflicts.
+- Only disagreements **inside** the price-list workbook (WS tab vs D tab vs order form), UPC disagreements and status disagreements remain conflicts for Ken.
+- **Conflicts are decided in Google Sheets:** a separate spreadsheet, "Master SKU Database – Outputs" (created by Ken, shared with the service account as Editor), has a Conflicts tab with a "Your decision" column. Each sync reads the decisions first, then imports, then rewrites the tabs.

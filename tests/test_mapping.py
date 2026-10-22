@@ -62,8 +62,13 @@ def test_conflicts(m):
     c = m.conflicts
     assert "GPM-001-APZZ|upc" in c                     # master vs template UPC
     assert "GPM-001-APZZ|status_master" in c           # master Inactive but on price list
-    assert "GPM-001-APZZ|price_US_distribution" in c   # Cin7 tier3 49 vs price list 51
-    assert "SG4-KIT-STGR-02|price_US_msrp" in c        # master MSRP 499.95 vs 449.95
+    assert "GPM-001-APZZ|price_CA_msrp" in c           # WS tab 99.95 vs D tab 129.95: Ken decides
+    # Ken: the price list beats Cin7 and the master MSRP, so these are fix-list items, not conflicts
+    assert "GPM-001-APZZ|price_US_distribution" not in c
+    assert "SG4-KIT-STGR-02|price_US_msrp" not in c
+    fixes = {(f["code"], f["field"], f["source"]) for f in m.source_fixes}
+    assert ("GPM-001-APZZ", "US distribution", "Cin7") in fixes
+    assert ("SG4-KIT-STGR-02", "US msrp", "Master SKU-List GS Holistic") in fixes
     assert "GPM-001-APZZ|price_US_msrp" not in c       # all sources agree
     assert "GPM-001-APZZ|units_master_case" in c       # 100 (master) vs 200 (template)
 

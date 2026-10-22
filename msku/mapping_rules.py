@@ -95,3 +95,7 @@ PRICE_PRIMARY = {"msrp": "WS", "wholesale": "WS", "distribution": "D"}
 
 # Costs above this are rejected as data errors (e.g. a UPC pasted into a cost cell) and reported.
 MAX_PLAUSIBLE_COST = 100_000
+
+# Ken (2026-10-22): the price list always beats Cin7 and the master sheet's MSRP.
+# Only these observation kinds can create a price conflict; anything else that differs goes on the fix list.
+PRICE_LIST_KINDS = ("WS", "D", "order_form")

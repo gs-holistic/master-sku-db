@@ -6,6 +6,8 @@
   conflicts [--all]       list open conflicts
   resolve FP VALUE [--note TEXT]   record Ken's decision for a conflict (remembered on later imports)
   preview                 build master-sku-preview.html from the database
+  outputs                 read decisions from, then rewrite, the "Master SKU Database – Outputs" sheet
+  sync [--dry-run]        fetch + read decisions + import + rewrite the outputs sheet (the normal routine)
 """
 import argparse
 import getpass
@@ -31,6 +33,11 @@ def main():
     p.add_argument("--note")
     p.add_argument("--actor", default=os.environ.get("MSKU_ACTOR", getpass.getuser()))
     sub.add_parser("preview")
+    p = sub.add_parser("outputs")
+    p.add_argument("--actor", default="Ken (Outputs sheet)")
+    p = sub.add_parser("sync")
+    p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--actor", default=os.environ.get("MSKU_ACTOR", getpass.getuser()))
     a = ap.parse_args()
 
     if a.cmd == "fetch":
@@ -59,6 +66,33 @@ def main():
     elif a.cmd == "preview":
         from .preview import build
         build(conn)
+    elif a.cmd in ("outputs", "sync"):
+        from . import outputs
+        if a.cmd == "sync":
+            from .sheets import fetch_all
+            fetch_all()
+        try:
+            sheet = outputs.open_output_sheet()
+        except SystemExit as e:
+            sheet = None
+            print(f"Outputs sheet skipped: {e}")
+        if sheet:
+            n, problems = outputs.read_decisions(sheet, conn)
+            print(f"Decisions recorded from the Conflicts tab: {n}")
+            for p_ in problems:
+                print("  !", p_)
+        if a.cmd == "sync":
+            from .consolidate import consolidate
+            from .sheets import load_all
+            src = load_all()
+            stats = db.load(conn, consolidate(src), src, a.actor, dry_run=a.dry_run)
+            print(("DRY RUN, nothing saved. " if a.dry_run else "") + json.dumps(
+                {k: stats[k] for k in ("skus", "tier_moves", "prices_opened", "prices_closed", "conflicts_open", "source_fixes_open", "warnings")},
+                indent=2, ensure_ascii=False))
+            if a.dry_run:
+                return
+        if sheet:
+            print("Outputs sheet updated:", outputs.write_all(sheet, conn))
 
 
 if __name__ == "__main__":

@@ -96,7 +96,7 @@ def test_cost_rules(conn):
     run(conn, sources())
     # ex-factory beats master; landed = unit x 1.24
     src_, unit, landed = one(conn, "SELECT unit_cost_source, unit_cost, approx_landed_cost FROM cost.landed_cost WHERE code = 'GPM-001-APZZ'")
-    assert (src_, float(unit), float(landed)) == ("ex_factory", 10.0, 12.4)
+    assert (src_, float(unit), float(landed)) == ("ex_factory", 13.37, 16.58)
     assert one(conn, "SELECT cost_missing FROM cost.landed_cost WHERE code = 'SG4-KIT-STGR-02'")[0] is True
     # a new per-order cost entered later wins and keeps history
     sid = one(conn, "SELECT id FROM core.sku WHERE code = 'GPM-001-APZZ'")[0]
@@ -106,7 +106,7 @@ def test_cost_rules(conn):
     assert one(conn, "SELECT count(*) FROM cost.unit_cost WHERE sku_id = %s", sid)[0] == 3
     # the uplift is a setting
     conn.execute("UPDATE cost.setting SET value = 0.30 WHERE key = 'landed_uplift'")
-    assert float(one(conn, "SELECT approx_landed_cost FROM cost.landed_cost WHERE code = 'GPM-001-APZZ'")[0]) == 14.95
+    assert float(one(conn, "SELECT approx_landed_cost FROM cost.landed_cost WHERE code = 'GPM-001-APZZ'")[0]) == 14.95   # the PO cost (11.50) x 1.30
 
 
 def test_audit_records_who_and_before(conn):
