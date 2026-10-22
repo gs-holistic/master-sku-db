@@ -58,7 +58,7 @@
 
 ## 2026-10-22: Cost sources, names, schema (from Ken)
 
-- **Unit cost source:** when both the ex-factory tab and the master sheet have a unit cost, the **ex-factory tab wins**. The master value is kept as history and the disagreement goes in the conflict report.
+- **Unit cost source:** when both the ex-factory tab and the master sheet have a unit cost, the **ex-factory tab wins**. The master value is kept as history in the restricted cost schema. Cost disagreements are deliberately kept out of the shared conflict report so costs are never exposed there.
 - **Landed cost:** the 24% calculation (unit × 1.24) **replaces** the master sheet's "Landed Cost" column (which was ~35%). The sheet value is kept as a reference only.
 - **Missing costs:** SKUs with no unit cost in any source are **flagged as missing**. Nothing is estimated.
 - `GPD-002-AMGD`: **RED** is correct. The master colour code "BLU" on row 77 is wrong and is overridden to RED.
