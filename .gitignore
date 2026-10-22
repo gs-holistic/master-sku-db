@@ -1,0 +1,17 @@
+# Secrets: never commit
+secrets/
+.env
+.env.*
+!.env.example
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Local caches
+.cache/
+
+# Built preview (contains wholesale prices and stock)
+master-sku-preview.html
+.pgdata/

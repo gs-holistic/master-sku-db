@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Master SKU Database</title>
+<style>
+:root{
+  --bg:#f7f7f5;--panel:#ffffff;--ink:#1c1c1a;--muted:#6b6b66;--line:#e4e3de;--soft:#f0efea;
+  --accent:#2d5bd7;--t1:#1f7a4d;--t1bg:#e3f3ea;--t2:#9a6400;--t2bg:#fbf0d9;--t3:#8a8a84;--t3bg:#eeeeea;
+  --warn:#b4441f;--warnbg:#fbe7df;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#161615;--panel:#1f1f1d;--ink:#ecebe6;--muted:#9b9a93;--line:#33322f;--soft:#2a2a27;
+  --accent:#7d9bff;--t1:#6fd19d;--t1bg:#1d3328;--t2:#f0bd5e;--t2bg:#3a2e16;--t3:#a9a9a2;--t3bg:#2c2c29;
+  --warn:#ff9a76;--warnbg:#3d2219;}}
+:root[data-theme="dark"]{
+  --bg:#161615;--panel:#1f1f1d;--ink:#ecebe6;--muted:#9b9a93;--line:#33322f;--soft:#2a2a27;
+  --accent:#7d9bff;--t1:#6fd19d;--t1bg:#1d3328;--t2:#f0bd5e;--t2bg:#3a2e16;--t3:#a9a9a2;--t3bg:#2c2c29;
+  --warn:#ff9a76;--warnbg:#3d2219;}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif}
+header{padding:20px 16px 0;max-width:1400px;margin:0 auto}
+h1{font-size:20px;margin:0 0 2px;font-weight:650}
+.sub{color:var(--muted);font-size:13px}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin:16px 0}
+.tile{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px;cursor:pointer;text-align:left;color:inherit;font:inherit}
+.tile b{display:block;font-size:22px;font-variant-numeric:tabular-nums}
+.tile span{color:var(--muted);font-size:12px}
+.tile.on{outline:2px solid var(--accent)}
+main{max-width:1400px;margin:0 auto;padding:0 16px 40px}
+.bar{position:sticky;top:0;z-index:5;background:var(--bg);padding:10px 0;display:flex;flex-wrap:wrap;gap:8px;align-items:center;border-bottom:1px solid var(--line)}
+#q{flex:1 1 320px;min-width:0;font:inherit;font-size:15px;padding:10px 12px 10px 36px;border:1px solid var(--line);border-radius:8px;background:var(--panel) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%23888' stroke-width='2'%3E%3Ccircle cx='7' cy='7' r='5'/%3E%3Cpath d='M11 11l4 4'/%3E%3C/svg%3E") no-repeat 12px center;color:var(--ink)}
+#q:focus{outline:2px solid var(--accent);border-color:transparent}
+select{font:inherit;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--ink)}
+.tabs{display:flex;gap:4px;margin-top:4px;flex-wrap:wrap}
+.tabs button{font:inherit;border:0;background:none;color:var(--muted);padding:8px 12px;border-radius:8px;cursor:pointer}
+.tabs button.on{background:var(--panel);color:var(--ink);box-shadow:0 0 0 1px var(--line)}
+.count{color:var(--muted);font-size:13px;margin:10px 0}
+.tablewrap{overflow-x:auto;background:var(--panel);border:1px solid var(--line);border-radius:10px}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th,td{padding:8px 10px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}
+th{position:sticky;top:0;background:var(--soft);font-weight:600;font-size:12px;color:var(--muted);cursor:pointer;white-space:nowrap;user-select:none}
+tbody tr{cursor:pointer}
+tbody tr:hover{background:var(--soft)}
+td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+td.mono{white-space:nowrap}
+code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+.pill{display:inline-block;padding:1px 8px;border-radius:99px;font-size:12px;font-weight:600;white-space:nowrap}
+.t1{color:var(--t1);background:var(--t1bg)}.t2{color:var(--t2);background:var(--t2bg)}.t3{color:var(--t3);background:var(--t3bg)}
+.warn{color:var(--warn);background:var(--warnbg)}
+.new{color:var(--accent);border:1px solid var(--accent);background:none}
+mark{background:#ffe58a;color:#000;border-radius:2px}
+.muted{color:var(--muted)}
+#drawer{position:fixed;inset:0 0 0 auto;width:min(620px,100%);background:var(--panel);border-left:1px solid var(--line);box-shadow:-8px 0 24px rgba(0,0,0,.15);transform:translateX(100%);transition:transform .18s;overflow-y:auto;z-index:20;padding:20px 16px 40px}
+#drawer.open{transform:none}
+#drawer h2{font-size:18px;margin:4px 0}
+#drawer h3{font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:22px 0 6px}
+#drawer table{font-size:12.5px}
+#close{float:right;font:inherit;font-size:20px;border:0;background:none;color:var(--muted);cursor:pointer}
+.src{color:var(--muted);font-size:11.5px}
+.note{background:var(--soft);border-radius:8px;padding:12px 14px;margin:12px 0;font-size:13px}
+.about li{margin:4px 0}
+@media (max-width:700px){.hide-sm{display:none}}
+</style>
+</head>
+<body>
+<header>
+  <h1>Master SKU Database</h1>
+  <div class="sub" id="sub"></div>
+  <div class="tiles" id="tiles"></div>
+</header>
+<main>
+  <div class="bar">
+    <input id="q" type="search" placeholder="Search SKU, name, UPC, category…  (press / to focus)" autocomplete="off" autofocus>
+    <select id="fBrand"><option value="">All brands</option></select>
+    <select id="fPack"><option value="">All pack types</option></select>
+    <select id="fFlag"><option value="">Any flags</option><option value="flag">Has a flag</option><option value="conflict">Has a conflict</option><option value="new">Marked NEW</option></select>
+  </div>
+  <div class="tabs" id="tabs">
+    <button data-v="skus" class="on">SKUs</button>
+    <button data-v="conflicts">Conflicts</button>
+    <button data-v="exclusions">Excluded codes</button>
+    <button data-v="about">How this works</button>
+  </div>
+  <div class="count" id="count"></div>
+  <div id="view"></div>
+</main>
+<aside id="drawer" aria-hidden="true"><button id="close" aria-label="Close">×</button><div id="dbody"></div></aside>
+<script id="data" type="application/json">/*DATA*/</script>
+<script>
+const D = JSON.parse(document.getElementById('data').textContent);
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const fmt = n => n == null ? '' : Number(n).toLocaleString(undefined,{maximumFractionDigits:2});
+const TIER = {1:'Tier 1 · Active',2:'Tier 2 · Falling',3:'Tier 3 · Discontinued'};
+const conflictBy = {}; D.conflicts.forEach(c => (conflictBy[c.code] ??= []).push(c));
+const state = {view:'skus', tier:0, sort:'code', dir:1};
+
+$('#sub').textContent = `From the Master SKU database · imported ${D.imported} · Cin7 stock as of ${D.stock_as_of} · read-only · costs not shown`;
+const counts = {1:0,2:0,3:0}; D.skus.forEach(s => counts[s.tier]++);
+const openC = D.conflicts.filter(c => c.status !== 'resolved').length;
+const tiles = [[0,D.skus.length,'All SKUs'],[1,counts[1],'Tier 1 · Active'],[2,counts[2],'Tier 2 · Falling'],[3,counts[3],'Tier 3 · Discontinued / OOS'],['c',openC,'Conflicts to resolve'],['x',D.exclusions.length,'Excluded codes']];
+$('#tiles').innerHTML = tiles.map(([k,v,l]) => `<button class="tile" data-k="${k}"><b>${fmt(v)}</b><span>${l}</span></button>`).join('');
+$('#tiles').onclick = e => { const t = e.target.closest('.tile'); if(!t) return; const k = t.dataset.k;
+  if(k==='c') setView('conflicts'); else if(k==='x') setView('exclusions'); else { state.tier = +k; setView('skus'); } };
+
+const uniq = a => [...new Set(a.filter(Boolean))].sort();
+uniq(D.skus.map(s=>s.brand)).forEach(b => $('#fBrand').add(new Option(b,b)));
+uniq(D.skus.map(s=>s.pack)).forEach(b => $('#fPack').add(new Option(b,b)));
+
+function terms(){ return $('#q').value.toLowerCase().trim().split(/\s+/).filter(Boolean); }
+function hl(text){ let t = esc(text); for(const w of terms()){ const re = new RegExp('('+w.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+')','ig'); t = t.replace(re,'<mark>$1</mark>'); } return t; }
+function hay(s){ return [s.code,s.name,s.upc,s.brand,s.family,s.category,s.pack,...s.names.map(x=>x.v),...s.upcs.map(x=>x.v)].join(' ').toLowerCase(); }
+D.skus.forEach(s => s._h = hay(s));
+const matches = (h) => terms().every(w => h.includes(w));
+
+function filtered(){
+  const b = $('#fBrand').value, p = $('#fPack').value, f = $('#fFlag').value;
+  return D.skus.filter(s => (!state.tier || s.tier===state.tier) && (!b || s.brand===b) && (!p || s.pack===p)
+    && (!f || (f==='flag' && s.flags.length) || (f==='conflict' && conflictBy[s.code]) || (f==='new' && s.new))
+    && matches(s._h));
+}
+
+function renderSkus(){
+  const cols = [['code','SKU'],['name','Name'],['brand','Brand'],['category','Category'],['pack','Pack'],['tier','Tier'],['available','Available*'],['upc','UPC'],['_f','Flags']];
+  let rows = filtered();
+  const k = state.sort;
+  rows.sort((a,b) => { const x = k==='_f' ? a.flags.length+(conflictBy[a.code]?.length||0) : a[k], y = k==='_f' ? b.flags.length+(conflictBy[b.code]?.length||0) : b[k];
+    return (typeof x==='number' ? x-y : String(x).localeCompare(String(y))) * state.dir; });
+  $('#count').innerHTML = `${fmt(rows.length)} of ${fmt(D.skus.length)} SKUs${state.tier?` · ${TIER[state.tier]} <a href="#" id="clrTier">clear</a>`:''} · <span class="muted">*Available = sum of column L across the 13 counted locations</span>`;
+  const show = rows.slice(0, 600);
+  $('#view').innerHTML = `<div class="tablewrap"><table><thead><tr>${cols.map(([k,l])=>`<th data-k="${k}" class="${['brand','category','upc'].includes(k)?'hide-sm':''}">${l}${state.sort===k?(state.dir>0?' ▲':' ▼'):''}</th>`).join('')}</tr></thead><tbody>${
+    show.map(s => { const nf = s.flags.length + (conflictBy[s.code]?.length||0);
+      return `<tr data-c="${esc(s.code)}"><td class="mono">${hl(s.code)}</td><td>${hl(s.name)}${s.new?' <span class="pill new">NEW</span>':''}</td><td class="hide-sm">${esc(s.brand)}</td><td class="hide-sm">${hl(s.category)}</td><td>${esc(s.pack)}</td><td><span class="pill t${s.tier}">T${s.tier}</span></td><td class="num">${s.stock && Object.keys(s.stock).length ? fmt(s.available) : '<span class="muted">—</span>'}</td><td class="mono hide-sm">${hl(s.upc)}</td><td>${nf?`<span class="pill warn">${nf}</span>`:''}</td></tr>`; }).join('')
+  }</tbody></table></div>${rows.length>600?`<p class="muted">Showing first 600. Refine your search to see more.</p>`:''}`;
+  $('#view thead').onclick = e => { const th = e.target.closest('th'); if(!th) return; state.dir = state.sort===th.dataset.k ? -state.dir : 1; state.sort = th.dataset.k; render(); };
+  $('#view tbody').onclick = e => { const tr = e.target.closest('tr'); if(tr) openSku(tr.dataset.c); };
+  const c = $('#clrTier'); if(c) c.onclick = e => { e.preventDefault(); state.tier = 0; render(); };
+}
+
+function renderConflicts(){
+  const rows = D.conflicts.filter(c => matches((c.code+' '+c.status+' '+c.kind+' '+c.detail+' '+c.values.map(v=>v.v+' '+v.src).join(' ')).toLowerCase()));
+  $('#count').innerHTML = `${rows.length} of ${D.conflicts.length} conflicts. Nothing is overwritten; each one waits for your decision. To decide one, tell Claude the SKU and the correct value.`;
+  $('#view').innerHTML = `<div class="tablewrap"><table><thead><tr><th>SKU</th><th>Status</th><th>Type</th><th>Issue</th><th>What each source says</th></tr></thead><tbody>${
+    rows.map(c => `<tr data-c="${esc(c.code)}"><td class="mono">${hl(c.code)}</td><td><span class="pill ${c.status==='resolved'?'t1':'warn'}">${esc(c.status)}</span>${c.decision?`<div class="src">Decided: ${esc(c.decision)}</div>`:''}</td><td>${esc(c.kind)}</td><td>${esc(c.detail)}</td><td>${c.values.map(v=>`<div><b>${esc(v.v)}</b> <span class="src">${esc(v.src)}</span></div>`).join('')}</td></tr>`).join('')
+  }</tbody></table></div>`;
+  $('#view tbody').onclick = e => { const tr = e.target.closest('tr'); if(tr) openSku(tr.dataset.c); };
+}
+
+function renderExclusions(){
+  const rows = D.exclusions.filter(e => matches((e.code+' '+e.reason+' '+(e.name||'')).toLowerCase()));
+  $('#count').innerHTML = `${rows.length} of ${D.exclusions.length} codes left out of the database, with the reason.`;
+  $('#view').innerHTML = `<div class="tablewrap"><table><thead><tr><th>Code</th><th>Reason</th><th class="hide-sm">Name (Cin7)</th><th>Seen in</th></tr></thead><tbody>${
+    rows.map(e => `<tr><td class="mono">${hl(e.code)}</td><td>${esc(e.reason)}</td><td class="hide-sm">${hl(e.name||'')}</td><td class="src">${esc(e.seen_in.join(' · '))}</td></tr>`).join('')
+  }</tbody></table></div>`;
+}
+
+function renderAbout(){
+  $('#count').textContent = '';
+  $('#view').innerHTML = `<div class="note about"><b>Tiers</b><ul>
+  <li><span class="pill t1">Tier 1</span> On any of the 12 price-list tabs in “G Pen / Stündenglass Price Lists + Order Form + Ex-Factory Unit Costs”. Stays Tier 1 at zero stock. In-development SKUs will also be Tier 1 once their list arrives.</li>
+  <li><span class="pill t2">Tier 2</span> Not on the price list, and the sum of Cin7 <i>Available</i> (column L) across the counted locations is above 0.</li>
+  <li><span class="pill t3">Tier 3</span> Not on the price list, and no Available stock in the counted locations.</li>
+  <li>Each pack SKU (Inner Pack / POP, Master Case) gets its tier from its own row.</li></ul>
+  <b>Counted locations</b><div class="src" style="margin:4px 0 10px">${D.counted_locations.map(esc).join(' · ')}</div>
+  <b>Left out</b><ul><li>Grenco Goods, Route, Printful, fees/tests, CS-ONLY parts, legacy numeric IDs, placeholder rows.</li><li>All -10 / -20 pack SKUs except GHO-007-AOZZ-10.</li><li>Duplicate master rows you chose to drop (see Excluded codes).</li></ul>
+  <b>Status of this page</b><ul><li>This page is generated from the Master SKU <b>Postgres database</b> and shows the state after the last import.</li>
+  <li>The master sheet's “Active” column is shown for reference only, and disagreements appear under Conflicts.</li>
+  <li>Cin7 PriceTier1/2/3 are US MSRP / Wholesale / Distribution (confirmed) and are used as a cross-check.</li><li>When the WS and D tabs disagree, the WS value is loaded for MSRP / Wholesale and the D value for Distribution until you decide.</li>
+  <li>The public sites (gpen.com, stundenglass.com, asset portals) aren't included yet because the network policy blocks them.</li>
+  <li>Costs are deliberately left off this page.</li></ul></div>`;
+}
+
+function openSku(code){
+  const s = D.skus.find(x => x.code===code); if(!s) return;
+  const conf = conflictBy[code] || [];
+  const priceRows = s.prices.slice().sort((a,b)=>(a.region+a.tier).localeCompare(b.region+b.tier));
+  const stock = Object.entries(s.stock).sort((a,b)=>(b[1].counted-a[1].counted)||b[1].available-a[1].available);
+  $('#dbody').innerHTML = `
+    <div class="mono muted">${esc(s.code)}</div><h2>${esc(s.name)}</h2>
+    <div><span class="pill t${s.tier}">${TIER[s.tier]}</span> ${s.new?'<span class="pill new">NEW</span>':''} <span class="muted">${esc(s.tier_reason)}</span></div>
+    <table style="margin-top:12px"><tbody>
+      <tr><td class="muted">Brand</td><td>${esc(s.brand)}</td></tr><tr><td class="muted">Family</td><td>${esc(s.family)||'<span class="muted">not set</span>'}</td></tr><tr><td class="muted">Category</td><td>${esc(s.category)}</td></tr><tr><td class="muted">HTS code</td><td class="mono">${esc(s.hts)||'<span class="muted">none</span>'}</td></tr>
+      <tr><td class="muted">Pack type</td><td>${esc(s.pack)}</td></tr><tr><td class="muted">UPC</td><td class="mono">${esc(s.upc)||'<span class="muted">none</span>'}</td></tr>
+      <tr><td class="muted">Cin7 status</td><td>${esc(s.cin7_status)||'<span class="muted">not in Cin7</span>'}</td></tr>
+      <tr><td class="muted">Master “Active”</td><td>${esc(s.master_active)||'<span class="muted">blank</span>'} <span class="src">(reference only)</span></td></tr>
+      <tr><td class="muted">Master rows</td><td>${esc(s.master_rows.join(', '))||'<span class="muted">not in master list</span>'}</td></tr>
+      <tr><td class="muted">Price-list tabs</td><td>${esc(s.price_tabs.join(', '))||'<span class="muted">none</span>'}</td></tr>
+    </tbody></table>
+    ${s.flags.length?`<h3>Flags</h3>${s.flags.map(f=>`<div class="pill warn" style="margin:2px 0;white-space:normal">${esc(f)}</div>`).join('<br>')}`:''}
+    ${conf.length?`<h3>Conflicts</h3>${conf.map(c=>`<div class="note"><b>${esc(c.kind)}</b>: ${esc(c.detail)}${c.values.map(v=>`<div><b>${esc(v.v)}</b> <span class="src">${esc(v.src)}</span></div>`).join('')}</div>`).join('')}`:''}
+    <h3>Prices</h3>${priceRows.length?`<table><thead><tr><th>Region</th><th>Tier</th><th>Amount</th><th>Source</th></tr></thead><tbody>${priceRows.map(p=>`<tr><td>${p.region}</td><td>${p.tier}</td><td class="num">${fmt(p.amount)} ${p.currency}</td><td class="src">${esc(p.src)} · ${esc(p.at)}${p.note?`<br>${esc(p.note)}`:''}</td></tr>`).join('')}</tbody></table>`:'<span class="muted">No prices</span>'}
+    <h3>Stock by location (Cin7 10/22/26)</h3>${stock.length?`<table><thead><tr><th>Location</th><th>Available</th><th>On hand</th><th>On order</th></tr></thead><tbody>${stock.map(([l,v])=>`<tr style="${v.counted?'':'opacity:.55'}"><td>${esc(l)}${v.counted?'':' <span class="src">(not counted)</span>'}</td><td class="num">${fmt(v.available)}</td><td class="num">${fmt(v.on_hand)}</td><td class="num">${fmt(v.on_order)}</td></tr>`).join('')}<tr><td><b>Counted total</b></td><td class="num"><b>${fmt(s.available)}</b></td><td></td><td></td></tr></tbody></table>`:'<span class="muted">Not in Cin7</span>'}
+    <h3>Physical / packaging</h3>${s.physical.length?`<table><tbody>${s.physical.map(p=>`<tr><td class="muted">${esc(p.field)}</td><td>${esc(p.v)}</td><td class="src">${esc(p.src)} · ${esc(p.at)}</td></tr>`).join('')}</tbody></table>`:'<span class="muted">None recorded</span>'}
+    <h3>Names by source</h3><table><tbody>${s.names.map(x=>`<tr><td>${esc(x.v)}</td><td class="src">${esc(x.src)} · ${esc(x.at)}</td></tr>`).join('')}</tbody></table>
+    ${s.links.length?`<h3>Links</h3>${s.links.map(l=>`<div><a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.label)}</a> <span class="src">${esc(l.src)}</span></div>`).join('')}`:''}`;
+  $('#drawer').classList.add('open'); $('#drawer').setAttribute('aria-hidden','false'); $('#drawer').scrollTop = 0;
+}
+const closeDrawer = () => { $('#drawer').classList.remove('open'); $('#drawer').setAttribute('aria-hidden','true'); };
+$('#close').onclick = closeDrawer;
+
+function setView(v){ state.view = v; document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.v===v)); render(); }
+$('#tabs').onclick = e => { const b = e.target.closest('button'); if(b) setView(b.dataset.v); };
+function render(){
+  document.querySelectorAll('.tile').forEach(t => t.classList.toggle('on', state.view==='skus' && String(state.tier)===t.dataset.k || state.view==='conflicts'&&t.dataset.k==='c' || state.view==='exclusions'&&t.dataset.k==='x'));
+  ({skus:renderSkus, conflicts:renderConflicts, exclusions:renderExclusions, about:renderAbout})[state.view]();
+}
+let tmr; $('#q').oninput = () => { clearTimeout(tmr); tmr = setTimeout(render, 120); };
+['#fBrand','#fPack','#fFlag'].forEach(id => $(id).onchange = () => { if(state.view!=='skus') setView('skus'); else render(); });
+document.addEventListener('keydown', e => {
+  if(e.key==='/' && document.activeElement!==$('#q')){ e.preventDefault(); $('#q').focus(); }
+  if(e.key==='Escape') closeDrawer();
+});
+render();
+</script>
+</body>
+</html>

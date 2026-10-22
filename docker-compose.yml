@@ -1,0 +1,12 @@
+# Local Postgres for the Master SKU database. Hosting is not decided yet (Jordan), this is for local work only.
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: master_sku
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-locally}
+    ports: ["5433:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+volumes:
+  pgdata:
