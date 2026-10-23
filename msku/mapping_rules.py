@@ -106,3 +106,9 @@ PRICE_LIST_KINDS = ("WS", "D", "order_form")
 _GRAVITY_V3 = ("SG4-KIT-STBK-02", "SG4-KIT-STBU-02", "SG4-KIT-STDR-02", "SG4-KIT-STGR-02", "SG4-KIT-STPU-02")
 _B2C_MSRP = {"US": 499.95, "CA": None, "EU": None}   # US matches stundenglass.com and Cin7 PriceTier1
 MAP_ON_PRICE_LIST = {(code, region): msrp for code in _GRAVITY_V3 for region, msrp in _B2C_MSRP.items()}
+
+# ---------- manual tier overrides (Ken's decisions). code -> (tier, why). Applied after the normal rule,
+# recorded in tier history with the reason, and kept on every future import.
+TIER_OVERRIDES = {
+    "GPM-001-APZZ": (1, "Set by Ken (2026-10-23): Micro II Vaporizer is active; sold on the price list as its 10-pack POP"),
+}

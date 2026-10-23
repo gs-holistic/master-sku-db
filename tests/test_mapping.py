@@ -20,6 +20,13 @@ def test_tiers(m):
     assert "available only in locations that don't count" in " ".join(m.skus["GPX-888-ZZZZ"]["flags"])
 
 
+def test_manual_tier_override(m):
+    # GPM-001-APZZ is on the fixture price list anyway; check the override wins over the rule elsewhere
+    from msku import mapping_rules as R
+    assert R.TIER_OVERRIDES["GPM-001-APZZ"][0] == 1
+    assert m.skus["GPM-001-APZZ"]["tier"] == 1 and m.skus["GPM-001-APZZ"]["tier_reason"].startswith("Set by Ken")
+
+
 def test_exclusions(m):
     assert {"GHK-001-AOZZ-20", "GG00-ASH-FL-10", "ROUTEINS10"} <= set(m.exclusions)
     assert "GHK-001-AOZZ-20" not in m.skus

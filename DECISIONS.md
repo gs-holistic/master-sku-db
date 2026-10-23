@@ -85,3 +85,8 @@
 - B2C MSRP: US 499.95. **CA and EU B2C MSRP not given yet**, so they are left empty and flagged rather than guessed.
 - **Every other product:** keep the price list's "MSRP" column labelled as MSRP ("keep things simple").
 - **SKUs that drop out of every source** (e.g. `GHO-002-APST`, only in the 10/22 Cin7 export) are kept, moved to Tier 3 by the normal rule (not on the price list, no stock), recorded in tier history and flagged "No longer in any source".
+
+## 2026-10-23: Manual tier override (from Ken)
+
+- **`GPM-001-APZZ` (G Pen Micro II Vaporizer) is Tier 1.** By the normal rule it was Tier 2 (only its 10-pack POP `GPM-001-APZZ-Inner Pack` is on the price list; 5,886 units available). Overrides live in `TIER_OVERRIDES` in `msku/mapping_rules.py`, win over the rule on every import, and are recorded in tier history with their reason.
+- Open question: other single units are in the same position (their POP is on the price list, the unit isn't) — `GHK-001-AOZZ`, `GHO-001-AOZZ`, `GPA-001-APSC`, `GPD-001-APZZ`, `GSB-001-AOZZ` (Tier 2) and `GPD-001-APGR`, `GPD-001-APPU` (Tier 3).

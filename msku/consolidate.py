@@ -364,6 +364,8 @@ def _derive(m):
         s["available_counted"] = avail.get(code, 0.0)
         s["available_other"] = other.get(code, 0.0)
         s["tier"], s["tier_reason"] = tier_for(bool(s["price_tabs"]), s["available_counted"])
+        if code in R.TIER_OVERRIDES:
+            s["tier"], s["tier_reason"] = R.TIER_OVERRIDES[code]
         if s["tier"] == 3 and s["available_other"] > 0:
             s["flags"].append(f"{s['available_other']:,.0f} available only in locations that don't count")
         if not s["master_rows"]:
