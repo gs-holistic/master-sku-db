@@ -91,6 +91,13 @@ def main():
                 indent=2, ensure_ascii=False))
             if a.dry_run:
                 return
+            if sheet:
+                # On a fresh database the conflicts only exist after the import, so decisions already in the
+                # sheet couldn't be matched above. Read them again before the tab is rewritten, then apply them.
+                n, problems = outputs.read_decisions(sheet, conn)
+                if n:
+                    print(f"Decisions recovered from the sheet after import: {n}")
+                    db.load(conn, consolidate(src), src, a.actor)
         if sheet:
             print("Outputs sheet updated:", outputs.write_all(sheet, conn))
 

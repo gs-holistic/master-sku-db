@@ -132,3 +132,22 @@ def test_two_syncs_in_the_same_minute(conn):  # noqa: F811
         outputs.write_all(sheet, conn)     # same minute each time; the fake rejects duplicate names
     backups = [t for t in sheet.props if t.startswith("Backup Conflicts")]
     assert len(backups) == len(set(backups)) >= 2
+
+
+def test_decisions_survive_a_fresh_database(conn):  # noqa: F811
+    run(conn, sources())
+    sheet = FakeSheet()
+    outputs.write_all(sheet, conn)
+    rows = sheet.data[outputs.TAB_CONFLICTS]
+    i = next(i for i, r in enumerate(rows) if r[outputs.COL_KEY] == "GPM-001-APZZ|upc")
+    rows[i][outputs.COL_DECISION] = "811736020343"
+    outputs.read_decisions(sheet, conn)
+    run(conn, sources())
+    outputs.write_all(sheet, conn)                       # the sheet now shows the decision as "Decided"
+    # the database is lost and rebuilt
+    conn.execute("TRUNCATE ops.conflict, ops.conflict_resolution, core.sku CASCADE")
+    assert outputs.read_decisions(sheet, conn)[0] == 0   # before import: no conflicts to match yet
+    run(conn, sources())
+    assert outputs.read_decisions(sheet, conn)[0] == 1   # after import: recovered from the sheet
+    run(conn, sources())
+    assert conn.execute("SELECT upc FROM core.sku WHERE code = 'GPM-001-APZZ'").fetchone()[0] == "811736020343"
