@@ -393,6 +393,12 @@ def _derive(m):
             continue
         primary = [o for o in pl if o["kind"] == R.PRICE_PRIMARY[tier]] or pl
         chosen = primary[0]
+        b2c = R.MAP_ON_PRICE_LIST.get((code, region)) if tier == "msrp" else None
+        if b2c is not None:
+            # The price list's MSRP column is the B2B MAP here; the B2C MSRP is Ken's decision.
+            m.prices.append({"code": code, "region": region, "tier": "map", "currency": chosen["currency"],
+                             "amount": chosen["value"], "source": chosen["source"], "ref": chosen["ref"]})
+            chosen = {**chosen, "value": b2c, "source": "Ken (decision)", "ref": "B2C MSRP (DECISIONS.md)"}
         m.prices.append({"code": code, "region": region, "tier": tier, "currency": chosen["currency"],
                          "amount": chosen["value"], "source": chosen["source"], "ref": chosen["ref"]})
         workbook = [o for o in obs if o["kind"] in R.PRICE_LIST_KINDS]

@@ -68,9 +68,20 @@ def test_conflicts(m):
     assert "SG4-KIT-STGR-02|price_US_msrp" not in c
     fixes = {(f["code"], f["field"], f["source"]) for f in m.source_fixes}
     assert ("GPM-001-APZZ", "US distribution", "Cin7") in fixes
-    assert ("SG4-KIT-STGR-02", "US msrp", "Master SKU-List GS Holistic") in fixes
+    assert ("GPX-999-ZZZZ", "US msrp", "Master SKU-List GS Holistic") not in fixes   # not on the price list
     assert "GPM-001-APZZ|price_US_msrp" not in c       # all sources agree
     assert "GPM-001-APZZ|units_master_case" in c       # 100 (master) vs 200 (template)
+
+
+def test_map_and_b2c_msrp(m):
+    # Ken: for the SG4 Gravity Infusers the price list "MSRP" is the B2B MAP; B2C MSRP is 499.95
+    p = {(x["tier"]): x for x in m.prices if x["code"] == "SG4-KIT-STGR-02" and x["region"] == "US"}
+    assert p["map"]["amount"] == 449.95 and p["msrp"]["amount"] == 499.95
+    assert p["msrp"]["source"] == "Ken (decision)"
+    fixes = {(f["code"], f["field"], f["source"]) for f in m.source_fixes}
+    assert ("SG4-KIT-STGR-02", "US msrp", "Master SKU-List GS Holistic") not in fixes   # master 499.95 agrees
+    ca = [x for x in m.prices if x["code"] == "SG4-KIT-STGR-02" and x["region"] == "CA"]
+    assert {x["tier"] for x in ca} == {"msrp", "wholesale", "distribution"}           # rule is US only
 
 
 def test_conflict_hash_is_stable():

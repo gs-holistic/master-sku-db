@@ -17,7 +17,7 @@ CREATE ROLE core_db_sync LOGIN PASSWORD '…' IN ROLE msku_api_reader;
 | View | One row per | Columns |
 |---|---|---|
 | `api.skus` | SKU | sku_id, sku_code, name, brand, family, category, product_class, variant_code, pack_type, pack_qty, base_sku_code, upc, hts_code, country_of_origin, producer, is_new, **tier**, tier_since, tier_reason, updated_at, version |
-| `api.prices` | SKU × region × price tier (current only) | region (US/CA/EU), price_tier (msrp/wholesale/distribution/retail), currency, amount, effective_from, source |
+| `api.prices` | SKU × region × price tier (current only) | region (US/CA/EU), price_tier (msrp = B2C MSRP, map = B2B MAP, wholesale, distribution, retail), currency, amount, effective_from, source |
 | `api.price_history` | every price ever | as above plus effective_to |
 | `api.tier_history` | tier move | old_tier, new_tier, effective_date, reason |
 | `api.packaging` | SKU × level | level (unit/inner_pack/master_case/pallet), length_mm, width_mm, height_mm, weight_g, units_per_level |

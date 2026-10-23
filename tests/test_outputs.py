@@ -31,6 +31,8 @@ class FakeSheet:
             elif "duplicateSheet" in r:
                 src = next(t for t, p in self.props.items() if p["sheetId"] == r["duplicateSheet"]["sourceSheetId"])
                 t = r["duplicateSheet"]["newSheetName"]
+                if t in self.props:
+                    raise ValueError(f"A sheet with the name {t!r} already exists")   # like the real API
                 self.props[t] = {"sheetId": self.next_id, "title": t}
                 self.data[t] = self.read(src)
                 replies.append({"duplicateSheet": {"properties": self.props[t]}})
@@ -121,3 +123,12 @@ def test_normalise_decision():
     assert outputs.normalise_decision("Price · US msrp", "abc")[1]
     assert outputs.normalise_decision("UPC", "0811736020343") == ("0811736020343", None)
     assert outputs.normalise_decision("Status", "Keep on price list") == ("Keep on price list", None)
+
+
+def test_two_syncs_in_the_same_minute(conn):  # noqa: F811
+    run(conn, sources())
+    sheet = FakeSheet()
+    for _ in range(3):
+        outputs.write_all(sheet, conn)     # same minute each time; the fake rejects duplicate names
+    backups = [t for t in sheet.props if t.startswith("Backup Conflicts")]
+    assert len(backups) == len(set(backups)) >= 2

@@ -25,7 +25,7 @@ TAB_FIXES = "Fix list (other systems)"
 CONFLICT_HEADER = ["SKU", "Type", "Issue", "What each source says", "Your decision", "Your note", "Status",
                    "Decided by", "Decided at", "Key (do not edit)", "Check (do not edit)"]
 COL_DECISION, COL_NOTE, COL_KEY, COL_HASH = 4, 5, 9, 10
-PRICE_TIER_LABEL = {"msrp": "MSRP", "wholesale": "Wholesale", "distribution": "Distribution"}
+PRICE_TIER_LABEL = {"msrp": "MSRP", "map": "MAP (B2B)", "wholesale": "Wholesale", "distribution": "Distribution"}
 SHORT_SOURCE = {R.SPREADSHEETS["prices"][1]: "Price list", R.SPREADSHEETS["master"][1]: "Master SKU list"}
 
 
@@ -148,7 +148,9 @@ def _ensure_tabs(sheet, tabs, wanted):
 def _backup(sheet, tabs, tab, stamp):
     if tab not in tabs or not sheet.read(tab):
         return
-    name = f"Backup {tab} {stamp}"[:99]
+    name, k = f"Backup {tab} {stamp}"[:95], 2
+    while name in tabs:                     # two syncs in the same minute
+        name, k = f"Backup {tab} {stamp} ({k})"[:99], k + 1
     reply = sheet.batch([{"duplicateSheet": {"sourceSheetId": tabs[tab]["sheetId"], "newSheetName": name,
                                              "insertSheetIndex": 99}}])
     new_id = reply["replies"][0]["duplicateSheet"]["properties"]["sheetId"]
@@ -176,7 +178,7 @@ def readme_rows(stamp, n_skus, n_conflicts, n_fixes):
 
 
 def sku_rows(conn):
-    price_cols = [(r, t) for r in ("US", "CA", "EU") for t in ("msrp", "wholesale", "distribution")]
+    price_cols = [(r, t) for r in ("US", "CA", "EU") for t in ("msrp", "map", "wholesale", "distribution")]
     prices = {}
     for sid, region, tier, cur, amt in conn.execute("SELECT sku_id, region, price_tier, currency, amount FROM api.prices"):
         prices[(sid, region, tier)] = f"{amt:,.2f} {cur}"

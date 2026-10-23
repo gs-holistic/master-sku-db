@@ -71,3 +71,10 @@
 - **The price list always beats Cin7 and the master sheet's MSRP.** Those mismatches are no longer conflicts. They go on a **fix list** (`ops.source_fix`, and the "Fix list (other systems)" tab) for whoever maintains Cin7 / the master sheet. This cleared 56 of the 73 conflicts.
 - Only disagreements **inside** the price-list workbook (WS tab vs D tab vs order form), UPC disagreements and status disagreements remain conflicts for Ken.
 - **Conflicts are decided in Google Sheets:** a separate spreadsheet, "Master SKU Database – Outputs" (created by Ken, shared with the service account as Editor), has a Conflicts tab with a "Your decision" column. Each sync reads the decisions first, then imports, then rewrites the tabs.
+
+## 2026-10-23: MSRP vs MAP (from Ken)
+
+- For `SG4-KIT-STBK-02`, `SG4-KIT-STBU-02`, `SG4-KIT-STDR-02`, `SG4-KIT-STGR-02`, `SG4-KIT-STPU-02` (US), the price list's "MSRP" column ($449.95) is the **B2B MAP**. The **B2C MSRP is $499.95** (matches stundenglass.com and Cin7 PriceTier1).
+- The database stores them as two price tiers: `map` = 449.95 (source: price list) and `msrp` = 499.95 (source: Ken's decision). Cin7 / master sheet values of 499.95 are therefore correct and no longer on the fix list.
+- Applies to US only for now. Rule lives in `MAP_ON_PRICE_LIST` in `msku/mapping_rules.py`.
+- Ken updated Cin7 and the master sheet per the fix list. Master-sheet fixes confirmed on 2026-10-23; Cin7 fixes will show once a new Cin7 inventory export is shared.

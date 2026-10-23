@@ -5,7 +5,7 @@ from datetime import date
 
 PACK_LABEL = {"single_unit": "Single unit", "inner_pack": "Inner pack / POP", "pop_display": "POP display",
               "master_case": "Master case", "multi_pack": "Multi-pack", "kit": "Kit"}
-TIER_LABEL = {"msrp": "MSRP", "wholesale": "Wholesale", "distribution": "Distribution", "retail": "Retail"}
+TIER_LABEL = {"msrp": "MSRP", "map": "MAP (B2B)", "wholesale": "Wholesale", "distribution": "Distribution", "retail": "Retail"}
 
 
 def build(conn, out="master-sku-preview.html", template="scripts/preview_template.html"):

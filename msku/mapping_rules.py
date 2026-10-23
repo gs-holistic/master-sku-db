@@ -99,3 +99,13 @@ MAX_PLAUSIBLE_COST = 100_000
 # Ken (2026-10-22): the price list always beats Cin7 and the master sheet's MSRP.
 # Only these observation kinds can create a price conflict; anything else that differs goes on the fix list.
 PRICE_LIST_KINDS = ("WS", "D", "order_form")
+
+# Ken (2026-10-23): for these SKUs the price list's "MSRP" column is really the B2B MAP. The B2C MSRP is
+# separate (matches stundenglass.com and Cin7 PriceTier1). (code, region) -> B2C MSRP.
+MAP_ON_PRICE_LIST = {
+    ("SG4-KIT-STBK-02", "US"): 499.95,
+    ("SG4-KIT-STBU-02", "US"): 499.95,
+    ("SG4-KIT-STDR-02", "US"): 499.95,
+    ("SG4-KIT-STGR-02", "US"): 499.95,
+    ("SG4-KIT-STPU-02", "US"): 499.95,
+}
