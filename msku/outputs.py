@@ -25,6 +25,8 @@ TAB_FIXES = "Fix list (other systems)"
 CONFLICT_HEADER = ["SKU", "Type", "Issue", "What each source says", "Your decision", "Your note", "Status",
                    "Decided by", "Decided at", "Key (do not edit)", "Check (do not edit)"]
 COL_DECISION, COL_NOTE, COL_KEY, COL_HASH = 4, 5, 9, 10
+PRICE_TIER_LABEL = {"msrp": "MSRP", "wholesale": "Wholesale", "distribution": "Distribution"}
+SHORT_SOURCE = {R.SPREADSHEETS["prices"][1]: "Price list", R.SPREADSHEETS["master"][1]: "Master SKU list"}
 
 
 class Sheet:
@@ -180,7 +182,7 @@ def sku_rows(conn):
         prices[(sid, region, tier)] = f"{amt:,.2f} {cur}"
     stock = {sid: av for sid, av in conn.execute("SELECT sku_id, available_counted FROM api.stock")}
     hdr = ["SKU", "Name", "Brand", "Family", "Category", "Pack type", "Tier", "Tier since", "Tier reason", "UPC", "HTS code",
-           *[f"{r} {t.title()}" for r, t in price_cols], "Available (counted)", "NEW", "Review flags", "SKU ID", "Updated"]
+           *[f"{r} {PRICE_TIER_LABEL[t]}" for r, t in price_cols], "Available (counted)", "NEW", "Review flags", "SKU ID", "Updated"]
     rows = [hdr]
     for (sid, code, name, brand, family, cat, pack, tier, since, reason, upc_, hts, new, flags, upd) in conn.execute("""
             SELECT a.sku_id, a.sku_code, a.name, a.brand, a.family, a.category, a.pack_type, a.tier, a.tier_since, a.tier_reason,
@@ -202,7 +204,7 @@ def conflict_rows(conn):
             FROM ops.conflict c LEFT JOIN ops.conflict_resolution r USING (fingerprint)
             WHERE c.status <> 'cleared'
             ORDER BY (c.status = 'resolved'), c.kind, c.sku_code"""):
-        says = "\n".join(f"{c['value']}  ←  {c['source']} {c.get('ref', '')}".strip() for c in cands)
+        says = "\n".join(f"{c['value']}  ←  {SHORT_SOURCE.get(c['source'], c['source'])} {c.get('ref', '')}".strip() for c in cands)
         shown_status = {"open": "Needs decision", "reopened": "Sources changed: decide again", "resolved": "Decided"}[status]
         rows.append([code, kind, detail, says, dec if status == "resolved" else "", "", shown_status,
                      by or "", at.strftime("%Y-%m-%d") if at else "", fp, h])
