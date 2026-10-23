@@ -1,0 +1,99 @@
+name: Sync and publish
+
+# Reads Ken's Google Sheets (read-only) and the Conflicts decisions, loads the database,
+# rewrites the "Master SKU Database – Outputs" sheet, and builds the SKU browser page.
+#
+# Setup (see docs/HOSTING.md):
+#   secret   GOOGLE_SERVICE_ACCOUNT_JSON  required: the service-account key file contents
+#   secret   MSKU_DATABASE_URL            optional: a permanent Postgres. Without it the database is
+#                                         rebuilt from the sheets on every run (no price/tier/cost history).
+#   variable PUBLISH_PAGES = true         only once GitHub Pages for this repo is private to the org.
+#                                         The page shows wholesale/distribution prices and stock.
+
+on:
+  schedule:
+    - cron: "17 13 * * *"     # daily, 13:17 UTC (about 6am Pacific)
+  workflow_dispatch:
+
+concurrency:
+  group: sync
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+          POSTGRES_DB: master_sku
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      MSKU_ACTOR: github-actions
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -r requirements.txt
+
+      - name: Credentials and database
+        env:
+          KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          DB: ${{ secrets.MSKU_DATABASE_URL }}
+        run: |
+          if [ -z "$KEY" ]; then echo "::error::Secret GOOGLE_SERVICE_ACCOUNT_JSON is not set"; exit 1; fi
+          umask 077
+          KEYFILE="$RUNNER_TEMP/google-service-account.json"
+          printf '%s' "$KEY" > "$KEYFILE"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$KEYFILE" >> "$GITHUB_ENV"
+          if [ -n "$DB" ]; then
+            echo "::add-mask::$DB"
+            echo "MSKU_DATABASE_URL=$DB" >> "$GITHUB_ENV"
+          else
+            echo "::notice::No MSKU_DATABASE_URL secret: rebuilding the database from the sheets (no history kept)."
+            echo "MSKU_DATABASE_URL=postgresql://postgres@localhost:5432/master_sku?sslmode=disable" >> "$GITHUB_ENV"
+          fi
+
+      - run: python -m msku migrate
+      - run: python -m msku sync
+      - name: Build SKU browser page
+        run: |
+          python -m msku preview
+          mkdir -p site && mv master-sku-preview.html site/index.html
+
+      - name: Remove credentials
+        if: always()
+        run: rm -f "$RUNNER_TEMP/google-service-account.json"
+
+      # Always available to people with access to this repo: Actions run -> Artifacts.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: master-sku-page
+          path: site/index.html
+          retention-days: 14
+
+      - if: vars.PUBLISH_PAGES == 'true'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  pages:
+    needs: sync
+    if: vars.PUBLISH_PAGES == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4

@@ -6,6 +6,7 @@ One place for G Pen and Stündenglass product master data. It consolidates Ken's
 - **What the sheets contain:** [INVENTORY.md](INVENTORY.md)
 - **Every table explained:** [docs/SCHEMA.md](docs/SCHEMA.md)
 - **For systems that read this database (Tim):** [docs/API.md](docs/API.md)
+- **Running on GitHub (scheduled sync, live page):** [docs/HOSTING.md](docs/HOSTING.md)
 
 ## Setup
 
