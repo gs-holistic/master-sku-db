@@ -141,7 +141,7 @@ function renderSkus(){
 
 function renderConflicts(){
   const rows = D.conflicts.filter(c => matches((c.code+' '+c.status+' '+c.kind+' '+c.detail+' '+c.values.map(v=>v.v+' '+v.src).join(' ')).toLowerCase()));
-  $('#count').innerHTML = `${rows.length} of ${D.conflicts.length} conflicts. Nothing is overwritten; each one waits for your decision. To decide one, tell Claude the SKU and the correct value.`;
+  $('#count').innerHTML = `${rows.length} of ${D.conflicts.length} conflicts. Nothing is overwritten; each one waits for your decision. Decide them in the Conflicts tab of the “Master SKU Database – Outputs” Google Sheet.`;
   $('#view').innerHTML = `<div class="tablewrap"><table><thead><tr><th>SKU</th><th>Status</th><th>Type</th><th>Issue</th><th>What each source says</th></tr></thead><tbody>${
     rows.map(c => `<tr data-c="${esc(c.code)}"><td class="mono">${hl(c.code)}</td><td><span class="pill ${c.status==='resolved'?'t1':'warn'}">${esc(c.status)}</span>${c.decision?`<div class="src">Decided: ${esc(c.decision)}</div>`:''}</td><td>${esc(c.kind)}</td><td>${esc(c.detail)}</td><td>${c.values.map(v=>`<div><b>${esc(v.v)}</b> <span class="src">${esc(v.src)}</span></div>`).join('')}</td></tr>`).join('')
   }</tbody></table></div>`;
