@@ -78,3 +78,10 @@
 - The database stores them as two price tiers: `map` = 449.95 (source: price list) and `msrp` = 499.95 (source: Ken's decision). Cin7 / master sheet values of 499.95 are therefore correct and no longer on the fix list.
 - Applies to US only for now. Rule lives in `MAP_ON_PRICE_LIST` in `msku/mapping_rules.py`.
 - Ken updated Cin7 and the master sheet per the fix list. Master-sheet fixes confirmed on 2026-10-23; Cin7 fixes will show once a new Cin7 inventory export is shared.
+
+## 2026-10-23: MSRP vs MAP follow-up (from Ken)
+
+- The MSRP/MAP split for the five Gravity Infuser V3 SKUs applies in **US, Canada and the EU**. The price list "MSRP" column is loaded as **MAP** in all three (US 449.95 USD, CA 599.95 CAD, EU 449.95 EUR).
+- B2C MSRP: US 499.95. **CA and EU B2C MSRP not given yet**, so they are left empty and flagged rather than guessed.
+- **Every other product:** keep the price list's "MSRP" column labelled as MSRP ("keep things simple").
+- **SKUs that drop out of every source** (e.g. `GHO-002-APST`, only in the 10/22 Cin7 export) are kept, moved to Tier 3 by the normal rule (not on the price list, no stock), recorded in tier history and flagged "No longer in any source".

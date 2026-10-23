@@ -100,12 +100,9 @@ MAX_PLAUSIBLE_COST = 100_000
 # Only these observation kinds can create a price conflict; anything else that differs goes on the fix list.
 PRICE_LIST_KINDS = ("WS", "D", "order_form")
 
-# Ken (2026-10-23): for these SKUs the price list's "MSRP" column is really the B2B MAP. The B2C MSRP is
-# separate (matches stundenglass.com and Cin7 PriceTier1). (code, region) -> B2C MSRP.
-MAP_ON_PRICE_LIST = {
-    ("SG4-KIT-STBK-02", "US"): 499.95,
-    ("SG4-KIT-STBU-02", "US"): 499.95,
-    ("SG4-KIT-STDR-02", "US"): 499.95,
-    ("SG4-KIT-STGR-02", "US"): 499.95,
-    ("SG4-KIT-STPU-02", "US"): 499.95,
-}
+# Ken (2026-10-23): for the Gravity Infuser V3 SKUs the price list's "MSRP" column is really the B2B MAP,
+# in every region. The B2C MSRP is separate. (code, region) -> B2C MSRP, or None while Ken hasn't given it
+# (then MAP is loaded and MSRP is left empty and flagged). Every other product keeps "MSRP" as labelled.
+_GRAVITY_V3 = ("SG4-KIT-STBK-02", "SG4-KIT-STBU-02", "SG4-KIT-STDR-02", "SG4-KIT-STGR-02", "SG4-KIT-STPU-02")
+_B2C_MSRP = {"US": 499.95, "CA": None, "EU": None}   # US matches stundenglass.com and Cin7 PriceTier1
+MAP_ON_PRICE_LIST = {(code, region): msrp for code in _GRAVITY_V3 for region, msrp in _B2C_MSRP.items()}

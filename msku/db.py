@@ -119,6 +119,14 @@ def _load(conn, m, run_id, read_at):
             base = ids.get(s["base_code"]) if s["base_code"] else None
             cur.execute("UPDATE core.sku SET base_sku_id = %s WHERE id = %s AND base_sku_id IS DISTINCT FROM %s", (base, ids[code], base))
 
+    # SKUs already in the database that no source mentions any more: by Ken's rule that is Tier 3
+    # (not on the price list, no stock). Kept, never deleted, and flagged.
+    gone = sorted(set(ids) - set(m.skus))
+    with conn.cursor() as cur:
+        for code in gone:
+            cur.execute("""UPDATE core.sku SET review_flags = %s WHERE id = %s""", (["No longer in any source"], ids[code]))
+    st["skus_no_longer_in_sources"] = gone
+
     # tiers + history (history row only when the tier changes)
     current = {r[0]: r[1] for r in conn.execute("SELECT sku_id, tier FROM core.sku_tier")}
     as_of = date.fromisoformat(getattr(m, "stock_as_of", read_at))
@@ -135,6 +143,14 @@ def _load(conn, m, run_id, read_at):
                             (sid, s["tier"], as_of, s["tier_reason"]))
             else:
                 cur.execute("UPDATE core.sku_tier SET reason = %s WHERE sku_id = %s", (s["tier_reason"], sid))
+    with conn.cursor() as cur:
+        for code in gone:
+            sid, reason = ids[code], "No longer in any source (not on price list, no stock)"
+            if current.get(sid) != 3:
+                moved += 1
+                cur.execute("INSERT INTO core.sku_tier_history (sku_id, old_tier, new_tier, effective_date, reason, import_run_id) VALUES (%s,%s,3,%s,%s,%s)",
+                            (sid, current.get(sid), as_of, reason, run_id))
+                cur.execute("UPDATE core.sku_tier SET tier = 3, since = %s, reason = %s WHERE sku_id = %s", (as_of, reason, sid))
     st["tier_moves"] = moved
 
     # packaging levels: first value per field (template before master)

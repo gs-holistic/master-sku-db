@@ -80,8 +80,12 @@ def test_map_and_b2c_msrp(m):
     assert p["msrp"]["source"] == "Ken (decision)"
     fixes = {(f["code"], f["field"], f["source"]) for f in m.source_fixes}
     assert ("SG4-KIT-STGR-02", "US msrp", "Master SKU-List GS Holistic") not in fixes   # master 499.95 agrees
-    ca = [x for x in m.prices if x["code"] == "SG4-KIT-STGR-02" and x["region"] == "CA"]
-    assert {x["tier"] for x in ca} == {"msrp", "wholesale", "distribution"}           # rule is US only
+    # CA / EU: same split; MAP from the price list, B2C MSRP left empty until Ken gives it
+    ca = {x["tier"]: x for x in m.prices if x["code"] == "SG4-KIT-STGR-02" and x["region"] == "CA"}
+    assert set(ca) == {"map", "wholesale", "distribution"} and ca["map"]["amount"] == 449.95
+    assert "CA B2C MSRP not set yet (price list value is the MAP)" in m.skus["SG4-KIT-STGR-02"]["flags"]
+    # every other product keeps the price list "MSRP" as MSRP
+    assert {x["tier"] for x in m.prices if x["code"] == "GPM-001-APZZ" and x["region"] == "CA"} == {"msrp", "wholesale", "distribution"}
 
 
 def test_conflict_hash_is_stable():

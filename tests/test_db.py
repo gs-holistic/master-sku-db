@@ -140,3 +140,16 @@ def test_api_has_no_cost_columns(conn):
     cols = {r[0] for r in conn.execute("SELECT column_name FROM information_schema.columns WHERE table_schema = 'api'")}
     assert not any("cost" in c for c in cols)
     assert {"sku_id", "sku_code", "updated_at", "version"} <= cols
+
+
+def test_sku_that_leaves_every_source_drops_to_tier_3(conn):
+    run(conn, sources())
+    src = sources()
+    rows = src["cin7"]["tabs"]["AvailabilityReport_2026-10-22"]
+    src["cin7"]["tabs"]["AvailabilityReport_2026-10-22"] = [r for r in rows if r[1] != "GPX-999-ZZZZ"]
+    src["master"]["tabs"]["G Pen"] = [r for r in src["master"]["tabs"]["G Pen"] if not (r and r[0] == "GPX-999-ZZZZ")]
+    st = run(conn, src)
+    assert st["skus_no_longer_in_sources"] == ["GPX-999-ZZZZ"]
+    assert one(conn, "SELECT tier FROM api.skus WHERE sku_code = 'GPX-999-ZZZZ'")[0] == 3      # was Tier 2, still kept
+    assert one(conn, "SELECT old_tier, new_tier FROM api.tier_history WHERE sku_code = 'GPX-999-ZZZZ' AND old_tier IS NOT NULL") == (2, 3)
+    assert run(conn, src)["tier_moves"] == 0                                                   # idempotent
