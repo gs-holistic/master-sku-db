@@ -62,6 +62,17 @@ mark{background:#ffe58a;color:#000;border-radius:2px}
 .note{background:var(--soft);border-radius:8px;padding:12px 14px;margin:12px 0;font-size:13px}
 .about li{margin:4px 0}
 @media (max-width:700px){.hide-sm{display:none}}
+.files{display:flex;flex-direction:column;gap:8px}
+.file{display:grid;grid-template-columns:48px minmax(0,1fr) auto;gap:10px;align-items:center;padding:8px;border:1px solid var(--line);border-radius:8px}
+.thumb{width:48px;height:48px;border-radius:6px;background:var(--soft);object-fit:cover;display:grid;place-items:center;font-size:11px;color:var(--muted);font-weight:600}
+.file a{font-weight:600;word-break:break-word}
+.uploader{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.uploader input[type=file]{max-width:100%;font:inherit;font-size:12px}
+.uploader select{padding:5px 8px;font-size:12px}
+button.small{font:inherit;font-size:12px;padding:4px 10px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--ink);cursor:pointer}
+button.small.primary{background:var(--accent);color:var(--bg);border-color:var(--accent)}
+button.small:disabled{opacity:.55;cursor:not-allowed}
+.fmsg{font-size:12px;color:var(--muted)}
 </style>
 </head>
 <body>
@@ -75,7 +86,7 @@ mark{background:#ffe58a;color:#000;border-radius:2px}
     <input id="q" type="search" placeholder="Search SKU, name, UPC, category…  (press / to focus)" autocomplete="off" autofocus>
     <select id="fBrand"><option value="">All brands</option></select>
     <select id="fPack"><option value="">All pack types</option></select>
-    <select id="fFlag"><option value="">Any flags</option><option value="flag">Has a flag</option><option value="conflict">Has a conflict</option><option value="new">Marked NEW</option></select>
+    <select id="fFlag"><option value="">Any flags</option><option value="flag">Has a flag</option><option value="conflict">Has a conflict</option><option value="new">Marked NEW</option><option value="files">Has files</option></select>
   </div>
   <div class="tabs" id="tabs">
     <button data-v="skus" class="on">SKUs</button>
@@ -118,7 +129,7 @@ const matches = (h) => terms().every(w => h.includes(w));
 function filtered(){
   const b = $('#fBrand').value, p = $('#fPack').value, f = $('#fFlag').value;
   return D.skus.filter(s => (!state.tier || s.tier===state.tier) && (!b || s.brand===b) && (!p || s.pack===p)
-    && (!f || (f==='flag' && s.flags.length) || (f==='conflict' && conflictBy[s.code]) || (f==='new' && s.new))
+    && (!f || (f==='flag' && s.flags.length) || (f==='conflict' && conflictBy[s.code]) || (f==='new' && s.new) || (f==='files' && files.bySku[s.code]?.length))
     && matches(s._h));
 }
 
@@ -132,7 +143,7 @@ function renderSkus(){
   const show = rows.slice(0, 600);
   $('#view').innerHTML = `<div class="tablewrap"><table><thead><tr>${cols.map(([k,l])=>`<th data-k="${k}" class="${['brand','category','upc'].includes(k)?'hide-sm':''}">${l}${state.sort===k?(state.dir>0?' ▲':' ▼'):''}</th>`).join('')}</tr></thead><tbody>${
     show.map(s => { const nf = s.flags.length + (conflictBy[s.code]?.length||0);
-      return `<tr data-c="${esc(s.code)}"><td class="mono">${hl(s.code)}</td><td>${hl(s.name)}${s.new?' <span class="pill new">NEW</span>':''}</td><td class="hide-sm">${esc(s.brand)}</td><td class="hide-sm">${hl(s.category)}</td><td>${esc(s.pack)}</td><td><span class="pill t${s.tier}">T${s.tier}</span></td><td class="num">${s.stock && Object.keys(s.stock).length ? fmt(s.available) : '<span class="muted">—</span>'}</td><td class="mono hide-sm">${hl(s.upc)}</td><td>${nf?`<span class="pill warn">${nf}</span>`:''}</td></tr>`; }).join('')
+      return `<tr data-c="${esc(s.code)}"><td class="mono">${hl(s.code)}</td><td>${hl(s.name)}${s.new?' <span class="pill new">NEW</span>':''}${files.bySku[s.code]?.length?` <span class="src">· ${files.bySku[s.code].length} file${files.bySku[s.code].length>1?'s':''}</span>`:''}</td><td class="hide-sm">${esc(s.brand)}</td><td class="hide-sm">${hl(s.category)}</td><td>${esc(s.pack)}</td><td><span class="pill t${s.tier}">T${s.tier}</span></td><td class="num">${s.stock && Object.keys(s.stock).length ? fmt(s.available) : '<span class="muted">—</span>'}</td><td class="mono hide-sm">${hl(s.upc)}</td><td>${nf?`<span class="pill warn">${nf}</span>`:''}</td></tr>`; }).join('')
   }</tbody></table></div>${rows.length>600?`<p class="muted">Showing first 600. Refine your search to see more.</p>`:''}`;
   $('#view thead').onclick = e => { const th = e.target.closest('th'); if(!th) return; state.dir = state.sort===th.dataset.k ? -state.dir : 1; state.sort = th.dataset.k; render(); };
   $('#view tbody').onclick = e => { const tr = e.target.closest('tr'); if(tr) openSku(tr.dataset.c); };
@@ -188,16 +199,18 @@ function openSku(code){
       <tr><td class="muted">Master rows</td><td>${esc(s.master_rows.join(', '))||'<span class="muted">not in master list</span>'}</td></tr>
       <tr><td class="muted">Price-list tabs</td><td>${esc(s.price_tabs.join(', '))||'<span class="muted">none</span>'}</td></tr>
     </tbody></table>
+    <h3>Files</h3><div id="files" class="files"></div>
     ${s.flags.length?`<h3>Flags</h3>${s.flags.map(f=>`<div class="pill warn" style="margin:2px 0;white-space:normal">${esc(f)}</div>`).join('<br>')}`:''}
     ${conf.length?`<h3>Conflicts</h3>${conf.map(c=>`<div class="note"><b>${esc(c.kind)}</b>: ${esc(c.detail)}${c.values.map(v=>`<div><b>${esc(v.v)}</b> <span class="src">${esc(v.src)}</span></div>`).join('')}</div>`).join('')}`:''}
     <h3>Prices</h3>${priceRows.length?`<table><thead><tr><th>Region</th><th>Tier</th><th>Amount</th><th>Source</th></tr></thead><tbody>${priceRows.map(p=>`<tr><td>${p.region}</td><td>${p.tier}</td><td class="num">${fmt(p.amount)} ${p.currency}</td><td class="src">${esc(p.src)} · ${esc(p.at)}${p.note?`<br>${esc(p.note)}`:''}</td></tr>`).join('')}</tbody></table>`:'<span class="muted">No prices</span>'}
-    <h3>Stock by location (Cin7 10/22/26)</h3>${stock.length?`<table><thead><tr><th>Location</th><th>Available</th><th>On hand</th><th>On order</th></tr></thead><tbody>${stock.map(([l,v])=>`<tr style="${v.counted?'':'opacity:.55'}"><td>${esc(l)}${v.counted?'':' <span class="src">(not counted)</span>'}</td><td class="num">${fmt(v.available)}</td><td class="num">${fmt(v.on_hand)}</td><td class="num">${fmt(v.on_order)}</td></tr>`).join('')}<tr><td><b>Counted total</b></td><td class="num"><b>${fmt(s.available)}</b></td><td></td><td></td></tr></tbody></table>`:'<span class="muted">Not in Cin7</span>'}
+    <h3>Stock by location (Cin7 ${esc(D.stock_as_of || "")})</h3>${stock.length?`<table><thead><tr><th>Location</th><th>Available</th><th>On hand</th><th>On order</th></tr></thead><tbody>${stock.map(([l,v])=>`<tr style="${v.counted?'':'opacity:.55'}"><td>${esc(l)}${v.counted?'':' <span class="src">(not counted)</span>'}</td><td class="num">${fmt(v.available)}</td><td class="num">${fmt(v.on_hand)}</td><td class="num">${fmt(v.on_order)}</td></tr>`).join('')}<tr><td><b>Counted total</b></td><td class="num"><b>${fmt(s.available)}</b></td><td></td><td></td></tr></tbody></table>`:'<span class="muted">Not in Cin7</span>'}
     <h3>Physical / packaging</h3>${s.physical.length?`<table><tbody>${s.physical.map(p=>`<tr><td class="muted">${esc(p.field)}</td><td>${esc(p.v)}</td><td class="src">${esc(p.src)} · ${esc(p.at)}</td></tr>`).join('')}</tbody></table>`:'<span class="muted">None recorded</span>'}
     <h3>Names by source</h3><table><tbody>${s.names.map(x=>`<tr><td>${esc(x.v)}</td><td class="src">${esc(x.src)} · ${esc(x.at)}</td></tr>`).join('')}</tbody></table>
     ${s.links.length?`<h3>Links</h3>${s.links.map(l=>`<div><a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.label)}</a> <span class="src">${esc(l.src)}</span></div>`).join('')}`:''}`;
   $('#drawer').classList.add('open'); $('#drawer').setAttribute('aria-hidden','false'); $('#drawer').scrollTop = 0;
+  openCode = code; renderFiles(code);
 }
-const closeDrawer = () => { $('#drawer').classList.remove('open'); $('#drawer').setAttribute('aria-hidden','true'); };
+const closeDrawer = () => { $('#drawer').classList.remove('open'); $('#drawer').setAttribute('aria-hidden','true'); openCode = null; };
 $('#close').onclick = closeDrawer;
 
 function setView(v){ state.view = v; document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.v===v)); render(); }
@@ -212,6 +225,94 @@ document.addEventListener('keydown', e => {
   if(e.key==='/' && document.activeElement!==$('#q')){ e.preventDefault(); $('#q').focus(); }
   if(e.key==='Escape') closeDrawer();
 });
+// ---------- files per SKU. Only on the claude.ai page: `db` holds the index (skuFiles), `assets` the bytes.
+// Uploading and removing are for people who can edit the page; everyone who can open it can view files.
+const FILE_KINDS = ['Product photo', 'Packaging / die line', 'Barcode', 'Spec sheet', 'Manual', 'Certificate / compliance', 'Other'];
+const TYPE_BY_EXT = {pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp',
+  svg: 'image/svg+xml', mp4: 'video/mp4', webm: 'video/webm', csv: 'text/csv', md: 'text/markdown', json: 'application/json', txt: 'text/plain'};
+const UPLOAD_ERRORS = {too_large: 'over the size limit (20 MB, or 2 MB for SVG)', unsupported_type: 'this file type isn’t supported',
+  quota_or_state: 'file storage is full', rate_limited: 'too many uploads at once; try again in a minute', not_granted: 'you don’t have permission to upload',
+  store_unavailable: 'storage is busy; try again'};
+const files = {db: null, assets: null, user: null, uid: null, ready: false, bySku: {}, msg: null};
+let openCode = null;
+const fileType = f => TYPE_BY_EXT[(f.name.split('.').pop() || '').toLowerCase()] || null;
+const fsize = n => n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB';
+
+async function renderFiles(code){
+  const box = $('#files'); if(!box || openCode !== code) return;
+  if(!files.db){ box.innerHTML = `<p class="muted">${files.ready ? 'File storage isn’t available in this view.' : 'Files can be added and opened on the claude.ai version of this page.'}</p>`; return; }
+  const list = (files.bySku[code] || []).slice().sort((a, b) => (b.uploadedAt || '').localeCompare(a.uploadedAt || ''));
+  const ids = [...new Set(list.map(f => f.uploadedBy).filter(Boolean))];
+  const ps = files.user && ids.length ? await files.user.profiles(ids) : {};
+  if(openCode !== code) return;
+  const msg = files.msg && files.msg.code === code ? files.msg.text : '';
+  box.innerHTML = (list.length ? list.map(f => {
+      const url = '/_blob/' + encodeURIComponent(f.assetId), ext = (f.name.split('.').pop() || '').toUpperCase().slice(0, 4);
+      const thumb = (f.contentType || '').startsWith('image/') ? `<img class="thumb" src="${url}" alt="" data-ext="${esc(ext)}">` : `<span class="thumb">${esc(ext)}</span>`;
+      return `<div class="file">${thumb}<div style="min-width:0"><a href="${url}" target="_blank" rel="noopener">${esc(f.name)}</a>
+        <div class="src">${esc(f.kind)} · ${fsize(f.sizeBytes || 0)} · ${esc((f.uploadedAt || '').slice(0, 10))} · <span data-who="${esc(f.uploadedBy || '')}"></span></div></div>
+        ${files.assets ? `<button class="small" data-del="${esc(f._id)}">Remove</button>` : ''}</div>`; }).join('')
+    : '<p class="muted">No files yet.</p>')
+    + (files.assets
+      ? `<div class="uploader"><select id="fKind" aria-label="What kind of file">${FILE_KINDS.map(k => `<option>${k}</option>`).join('')}</select>
+         <input id="fInput" type="file" multiple accept="${Object.keys(TYPE_BY_EXT).map(e => '.' + e).join(',')}" aria-label="Choose files">
+         <button class="small primary" id="fUpload">Upload</button></div>
+         <div class="fmsg" id="fMsg">${esc(msg)}</div>
+         <p class="src">PDF, images, video, CSV, JSON, Markdown or text, up to 20 MB each. Design files (.ai, .eps, .psd, .zip) need a PDF or image export first.</p>`
+      : '<p class="src">Only people who can edit this page can add or remove files.</p>');
+  box.querySelectorAll('[data-who]').forEach(el => { const p = ps[el.dataset.who]; el.textContent = (p && p.name) || 'Someone'; });
+  box.querySelectorAll('img.thumb').forEach(img => img.addEventListener('error', () => {
+    const span = document.createElement('span'); span.className = 'thumb'; span.textContent = img.dataset.ext || 'FILE'; img.replaceWith(span); }));
+  const up = $('#fUpload'); if(up) up.onclick = () => uploadFiles(code);
+  box.querySelectorAll('[data-del]').forEach(b => b.onclick = () => removeFile(code, b.dataset.del, b));
+}
+
+async function uploadFiles(code){
+  const chosen = [...($('#fInput').files || [])], kind = $('#fKind').value;
+  if(!chosen.length){ files.msg = {code, text: 'Choose one or more files first.'}; return renderFiles(code); }
+  $('#fUpload').disabled = true;
+  let done = 0; const errs = [];
+  for(const f of chosen){
+    const type = fileType(f);
+    if(!type){ errs.push(`${f.name}: this file type isn’t supported`); continue; }
+    const m = $('#fMsg'); if(m) m.textContent = `Uploading ${f.name}…`;
+    try {
+      const r = await files.assets.upload(f, {type});
+      await files.db.collection('skuFiles').add({sku: code, assetId: r.id, name: f.name, kind, contentType: r.contentType,
+        sizeBytes: r.sizeBytes, uploadedBy: files.uid, uploadedAt: new Date().toISOString()});
+      done++;
+    } catch(e) { errs.push(`${f.name}: ${UPLOAD_ERRORS[e && e.code] || 'upload failed'}`); }
+  }
+  files.msg = {code, text: (done ? `Uploaded ${done} file${done > 1 ? 's' : ''}. ` : '') + errs.join(' · ')};
+  renderFiles(code);
+}
+
+async function removeFile(code, id, btn){
+  if(btn.dataset.armed !== '1'){ btn.dataset.armed = '1'; btn.textContent = 'Confirm remove'; return; }
+  const f = (files.bySku[code] || []).find(x => x._id === id); if(!f) return;
+  btn.disabled = true;
+  try { await files.assets.delete(f.assetId); }
+  catch(e) { files.msg = {code, text: e && e.code === 'not_uploader' ? 'You can only remove files you uploaded.' : 'Couldn’t remove the file. Try again.'}; return renderFiles(code); }
+  try { await files.db.collection('skuFiles').doc(id).delete(); files.msg = {code, text: `Removed ${f.name}.`}; }
+  catch(e) { files.msg = {code, text: 'The file was removed but its entry couldn’t be cleared. Reload the page.'}; renderFiles(code); }
+}
+
+(async () => {
+  if(!window.claude || !window.claude.use) return;
+  try { files.user = await claude.use('user'); } catch { files.user = null; }
+  try { files.db = await claude.use('db'); } catch { files.db = null; }
+  try { files.assets = await claude.use('assets'); } catch { files.assets = null; }
+  files.ready = true;
+  if(files.user) files.uid = await files.user.id();
+  if(!files.db){ if(openCode) renderFiles(openCode); return; }
+  files.db.collection('skuFiles').limit(1000).onSnapshot(snap => {
+    const by = {}; snap.docs.forEach(d => { const x = {...d.data(), _id: d.id}; (by[x.sku] ??= []).push(x); });
+    files.bySku = by;
+    if(state.view === 'skus') render();
+    if(openCode) renderFiles(openCode);
+  }, () => { files.db = null; if(openCode) renderFiles(openCode); });
+  if(openCode) renderFiles(openCode);
+})();
 render();
 </script>
 </body>
