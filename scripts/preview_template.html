@@ -227,7 +227,7 @@ document.addEventListener('keydown', e => {
 });
 // ---------- files per SKU. Only on the claude.ai page: `db` holds the index (skuFiles), `assets` the bytes.
 // Uploading and removing are for people who can edit the page; everyone who can open it can view files.
-const FILE_KINDS = ['Product photo', 'Packaging / die line', 'Barcode', 'Spec sheet', 'Manual', 'Certificate / compliance', 'Other'];
+const FILE_KINDS = ['Product photo', 'Packaging / die line', 'Barcode', 'Spec sheet', 'Manual', 'Safety data sheet (MSDS)', 'Certificate / compliance', 'Other'];
 const TYPE_BY_EXT = {pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp',
   svg: 'image/svg+xml', mp4: 'video/mp4', webm: 'video/webm', csv: 'text/csv', md: 'text/markdown', json: 'application/json', txt: 'text/plain'};
 const UPLOAD_ERRORS = {too_large: 'over the size limit (20 MB, or 2 MB for SVG)', unsupported_type: 'this file type isn’t supported',
@@ -250,7 +250,7 @@ async function renderFiles(code){
       const url = '/_blob/' + encodeURIComponent(f.assetId), ext = (f.name.split('.').pop() || '').toUpperCase().slice(0, 4);
       const thumb = (f.contentType || '').startsWith('image/') ? `<img class="thumb" src="${url}" alt="" data-ext="${esc(ext)}">` : `<span class="thumb">${esc(ext)}</span>`;
       return `<div class="file">${thumb}<div style="min-width:0"><a href="${url}" target="_blank" rel="noopener">${esc(f.name)}</a>
-        <div class="src">${esc(f.kind)} · ${fsize(f.sizeBytes || 0)} · ${esc((f.uploadedAt || '').slice(0, 10))} · <span data-who="${esc(f.uploadedBy || '')}"></span></div></div>
+        <div class="src">${esc(f.kind)}${f.note ? ' · ' + esc(f.note) : ''} · ${fsize(f.sizeBytes || 0)} · ${esc((f.uploadedAt || '').slice(0, 10))} · <span data-who="${esc(f.uploadedBy || '')}" data-label="${esc(f.addedBy || '')}"></span></div></div>
         ${files.assets ? `<button class="small" data-del="${esc(f._id)}">Remove</button>` : ''}</div>`; }).join('')
     : '<p class="muted">No files yet.</p>')
     + (files.assets
@@ -260,7 +260,7 @@ async function renderFiles(code){
          <div class="fmsg" id="fMsg">${esc(msg)}</div>
          <p class="src">PDF, images, video, CSV, JSON, Markdown or text, up to 20 MB each. Design files (.ai, .eps, .psd, .zip) need a PDF or image export first.</p>`
       : '<p class="src">Only people who can edit this page can add or remove files.</p>');
-  box.querySelectorAll('[data-who]').forEach(el => { const p = ps[el.dataset.who]; el.textContent = (p && p.name) || 'Someone'; });
+  box.querySelectorAll('[data-who]').forEach(el => { const p = ps[el.dataset.who]; el.textContent = (p && p.name) || el.dataset.label || 'Someone'; });
   box.querySelectorAll('img.thumb').forEach(img => img.addEventListener('error', () => {
     const span = document.createElement('span'); span.className = 'thumb'; span.textContent = img.dataset.ext || 'FILE'; img.replaceWith(span); }));
   const up = $('#fUpload'); if(up) up.onclick = () => uploadFiles(code);
@@ -291,7 +291,10 @@ async function removeFile(code, id, btn){
   if(btn.dataset.armed !== '1'){ btn.dataset.armed = '1'; btn.textContent = 'Confirm remove'; return; }
   const f = (files.bySku[code] || []).find(x => x._id === id); if(!f) return;
   btn.disabled = true;
-  try { await files.assets.delete(f.assetId); }
+  /* One document can belong to several SKUs (an MSDS covers every colourway), so the stored file is
+     only deleted when no other SKU still points at it. */
+  const shared = Object.values(files.bySku).flat().some(x => x.assetId === f.assetId && x._id !== f._id);
+  try { if(!shared) await files.assets.delete(f.assetId); }
   catch(e) { files.msg = {code, text: e && e.code === 'not_uploader' ? 'You can only remove files you uploaded.' : 'Couldn’t remove the file. Try again.'}; return renderFiles(code); }
   try { await files.db.collection('skuFiles').doc(id).delete(); files.msg = {code, text: `Removed ${f.name}.`}; }
   catch(e) { files.msg = {code, text: 'The file was removed but its entry couldn’t be cleared. Reload the page.'}; renderFiles(code); }
