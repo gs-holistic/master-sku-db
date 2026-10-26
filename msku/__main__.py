@@ -8,6 +8,8 @@
   preview                 build master-sku-preview.html from the database
   outputs                 read decisions from, then rewrite, the "Master SKU Database – Outputs" sheet
   sync [--dry-run]        fetch + read decisions + import + rewrite the outputs sheet (the normal routine)
+  serve [--port N]        run the G Pen Hub API locally over plain HTTP (development only; see docs/HUB_API.md)
+  new-api-key             print a new random key for MSKU_API_KEYS
 """
 import argparse
 import getpass
@@ -38,8 +40,23 @@ def main():
     p = sub.add_parser("sync")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--actor", default=os.environ.get("MSKU_ACTOR", getpass.getuser()))
+    p = sub.add_parser("serve")
+    p.add_argument("--port", type=int, default=8080)
+    sub.add_parser("new-api-key")
     a = ap.parse_args()
 
+    if a.cmd == "new-api-key":
+        import secrets
+        # 48 random bytes, URL-safe: 64 characters. Printed once; paste it straight into the host's secrets.
+        print(secrets.token_urlsafe(48))
+        return
+    if a.cmd == "serve":
+        from wsgiref.simple_server import make_server
+        from .hub_api import app
+        os.environ["MSKU_ALLOW_HTTP"] = "1"
+        print(f"G Pen Hub API on http://localhost:{a.port} (development only: plain HTTP)")
+        make_server("127.0.0.1", a.port, app).serve_forever()
+        return
     if a.cmd == "fetch":
         from .sheets import fetch_all
         fetch_all()

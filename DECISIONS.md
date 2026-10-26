@@ -90,3 +90,12 @@
 
 - **`GPM-001-APZZ` (G Pen Micro II Vaporizer) is Tier 1.** By the normal rule it was Tier 2 (only its 10-pack POP `GPM-001-APZZ-Inner Pack` is on the price list; 5,886 units available). Overrides live in `TIER_OVERRIDES` in `msku/mapping_rules.py`, win over the rule on every import, and are recorded in tier history with their reason.
 - Open question: other single units are in the same position (their POP is on the price list, the unit isn't) — `GHK-001-AOZZ`, `GHO-001-AOZZ`, `GPA-001-APSC`, `GPD-001-APZZ`, `GSB-001-AOZZ` (Tier 2) and `GPD-001-APGR`, `GPD-001-APPU` (Tier 3).
+
+## 2026-10-26: G Pen Hub API (from Ken)
+
+- The G Pen Hub (gpen-crm.vercel.app) reads and writes SKUs through an HTTP API: `msku/hub_api.py`, documented in `docs/HUB_API.md`. It uses the existing tables; migration 010 only adds things (`core.sku_spec`, `core.hub_lock`, `core.sku.origin`, an audit index and the `msku_hub_api` role).
+- **When the Hub and a sheet disagree, the Hub wins, and the difference is flagged (Ken's choice).** A field the Hub sets (name, brand, UPC, the five prices) is no longer overwritten by the sync. A sheet that says otherwise raises a "Changed in the G Pen Hub" conflict. Deciding it for the sheet's value hands the field back to the sheets.
+- SKUs created in the Hub (`origin = 'hub'`) aren't treated as "gone" by the sync. They have no tier until they appear on the price list or in Cin7.
+- `status` is new and belongs to the Hub. Until the Hub sets it, it follows the tier: 1 → active, 2 → deprecated, 3 → obsolete, new or untiered → draft. Setting it doesn't change the tier.
+- **Hosting is Jordan's call (Ken's choice).** The API is built and tested but not deployed. It needs a permanent Postgres and an HTTPS host. The key is generated on the host (`python -m msku new-api-key`) so it never passes through chat or email.
+- `distro_eu` and `distro_ca` are returned in EUR and CAD, as the price list holds them. No currency conversion.

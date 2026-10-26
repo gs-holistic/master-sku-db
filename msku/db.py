@@ -8,9 +8,13 @@ import psycopg
 from psycopg.types.json import Jsonb
 
 from . import mapping_rules as R
-from .rules import money
+from .rules import money, upc_key
 
 PACK_LEVELS = ("unit", "inner_pack", "master_case", "pallet")
+
+# Hub API field -> current price row (region, tier). The Hub's price fields, shared with hub_api.
+HUB_PRICE_FIELDS = {"msrp": ("US", "msrp"), "wholesale": ("US", "wholesale"), "distro": ("US", "distribution"),
+                    "distro_eu": ("EU", "distribution"), "distro_ca": ("CA", "distribution")}
 
 
 def connect():
@@ -93,6 +97,41 @@ def _load(conn, m, run_id, read_at):
         r = resolutions.get(fp)
         return r[0] if r and r[1] == current_hash else None
 
+    # Fields the G Pen Hub has set win over the sheets. A sheet that disagrees becomes a conflict for Ken;
+    # deciding it in the sheet's favour hands the field back to the sheets.
+    locks = {(code, f): (v, by) for code, f, v, by in conn.execute(
+        "SELECT s.code, l.field, l.value, l.set_by FROM core.hub_lock l JOIN core.sku s ON s.id = l.sku_id")}
+
+    def same(field, a, b):
+        if a in (None, "") or b in (None, ""):
+            return a in (None, "") and b in (None, "")
+        if field in HUB_PRICE_FIELDS:
+            return money(str(a)) == money(str(b))
+        if field == "upc":
+            return upc_key(str(a)) == upc_key(str(b))
+        return str(a).strip() == str(b).strip()
+
+    def hub_value(code, field, sheet_value, kind, ref=""):
+        """(locked, value): the value to store for a field the Hub may have set."""
+        if (code, field) not in locks:
+            return False, sheet_value
+        hub, by = locks[(code, field)]
+        if sheet_value in (None, "") or same(field, hub, sheet_value):
+            return True, hub
+        m.conflict(code, f"hub_{field}", kind, "Changed in the G Pen Hub; the sheets say otherwise",
+                   [{"value": hub or "(cleared)", "source": "G Pen Hub", "ref": by},
+                    {"value": str(sheet_value), "source": "Sheets", "ref": ref}])
+        c = m.conflicts[f"{code}|hub_{field}"]
+        chosen = resolved(c["fingerprint"], c["values_hash"])
+        if chosen is None:
+            return True, hub
+        if same(field, chosen, sheet_value):
+            conn.execute("DELETE FROM core.hub_lock l USING core.sku s WHERE s.id = l.sku_id AND s.code = %s AND l.field = %s",
+                         (code, field))
+            del locks[(code, field)]
+            return False, sheet_value
+        return True, chosen
+
     # SKUs
     with conn.cursor() as cur:
         for code, s in sorted(m.skus.items()):
@@ -100,6 +139,9 @@ def _load(conn, m, run_id, read_at):
             c = m.conflicts.get(f"{code}|upc")
             if c and resolved(c["fingerprint"], c["values_hash"]):
                 upc = resolved(c["fingerprint"], c["values_hash"])
+            _, upc = hub_value(code, "upc", upc, "UPC")
+            _, name = hub_value(code, "name", s["name"], "Name")
+            _, brand = hub_value(code, "brand", s["brand"], "Brand")
             cur.execute("""
                 INSERT INTO core.sku (code, name, brand_id, family_id, category, product_class, variant_code, pack_type,
                                       pack_qty, upc, hts_code, producer_id, is_new, code_check, master_active, review_flags)
@@ -110,7 +152,7 @@ def _load(conn, m, run_id, read_at):
                   upc = EXCLUDED.upc, hts_code = EXCLUDED.hts_code, producer_id = EXCLUDED.producer_id,
                   is_new = EXCLUDED.is_new, code_check = EXCLUDED.code_check, master_active = EXCLUDED.master_active,
                   review_flags = EXCLUDED.review_flags""",
-                (code, s["name"], brands.get(s["brand"]), families.get((s["brand"], s["family"])), s["category"],
+                (code, name, brands.get(brand), families.get((s["brand"], s["family"])), s["category"],
                  s["product_class"], s["variant_code"], s["pack_type"], s["pack_qty"], upc, s["hts_code"],
                  producers.get(s["producer"]), s["is_new"], s["code_check"], s["master_active"], sorted(set(s["flags"]))))
     ids = _id_map(conn, "SELECT code, id FROM core.sku")
@@ -121,7 +163,9 @@ def _load(conn, m, run_id, read_at):
 
     # SKUs already in the database that no source mentions any more: by Ken's rule that is Tier 3
     # (not on the price list, no stock). Kept, never deleted, and flagged.
-    gone = sorted(set(ids) - set(m.skus))
+    # SKUs created in the Hub aren't in the sheets yet; that doesn't make them gone.
+    hub_made = {r[0] for r in conn.execute("SELECT code FROM core.sku WHERE origin = 'hub'")}
+    gone = sorted(set(ids) - set(m.skus) - hub_made)
     with conn.cursor() as cur:
         for code in gone:
             cur.execute("""UPDATE core.sku SET review_flags = %s WHERE id = %s""", (["No longer in any source"], ids[code]))
@@ -172,6 +216,8 @@ def _load(conn, m, run_id, read_at):
     # prices: effective-dated. A changed amount closes the old row and opens a new one.
     cur_prices = {(r[0], r[1], r[2]): (r[3], r[4], r[5]) for r in conn.execute(
         "SELECT sku_id, region::text, tier::text, id, amount, currency FROM core.price WHERE effective_to IS NULL")}
+    hub_field = {v: k for k, v in HUB_PRICE_FIELDS.items()}
+    hub_keys = {(ids[code], *HUB_PRICE_FIELDS[f]) for code, f in locks if f in HUB_PRICE_FIELDS}
     seen, opened, closed = set(), 0, 0
     with conn.cursor() as cur:
         for p in m.prices:
@@ -181,6 +227,15 @@ def _load(conn, m, run_id, read_at):
             if c and resolved(c["fingerprint"], c["values_hash"]):
                 amount = money(resolved(c["fingerprint"], c["values_hash"]))
             seen.add(key)
+            if (p["region"], p["tier"]) in hub_field:
+                locked, value = hub_value(p["code"], hub_field[(p["region"], p["tier"])], amount,
+                                          f"Price · {p['region']} {p['tier']}", p["ref"])
+                if locked:
+                    if value in (None, ""):
+                        continue      # the Hub cleared it; leave it cleared
+                    amount = money(str(value))
+                else:
+                    hub_keys.discard(key)
             old = cur_prices.get(key)
             if old and float(old[1]) == amount and old[2] == p["currency"]:
                 continue
@@ -191,8 +246,8 @@ def _load(conn, m, run_id, read_at):
                            VALUES (%s,%s,%s,%s,%s,%s,%s,%s)""",
                         (*key, p["currency"], amount, today if old else read_at, p["source"], p["ref"]))
             opened += 1
-        for key, old in cur_prices.items():   # no longer on the price list
-            if key not in seen:
+        for key, old in cur_prices.items():   # no longer on the price list (unless the Hub set it)
+            if key not in seen and key not in hub_keys:
                 cur.execute("UPDATE core.price SET effective_to = %s WHERE id = %s", (today, old[0]))
                 closed += 1
     st["prices_opened"], st["prices_closed"] = opened, closed
