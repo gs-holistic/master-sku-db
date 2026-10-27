@@ -12,15 +12,15 @@ Every path below goes after it.
 - HTTPS only. A plain-HTTP request gets `403` (judged from `X-Forwarded-Proto`, which every HTTPS host sets).
 - No CORS and no browser login: the Hub calls this from its server, with the key kept in the Hub's server-side env.
 
-**The key** lives only in Vercel's environment variables (`MSKU_API_KEY`) and the Hub's server-side env. It's never
-in code, chat, Slack or email.
+**The key** lives only in Vercel's environment variables (`MSKU_API_KEYS`, and `HUB_WEBHOOK_KEY` for the ping
+back to the Hub) and the Hub's server-side env. It's never in code, chat, Slack, email, logs or files.
 
 - Make one: `python3 -c "import secrets; print(secrets.token_urlsafe(48))"`, which prints a random 64-character key.
   (`python -m msku new-api-key` does the same inside the repo.)
 - **Rotate** without downtime:
-  1. Move the current key to `MSKU_API_KEY_PREVIOUS`, put the new one in `MSKU_API_KEY`, and redeploy.
-  2. Update the Hub.
-  3. Delete `MSKU_API_KEY_PREVIOUS` and redeploy.
+  1. Set `MSKU_API_KEYS` to `<new>,<old>` and redeploy.
+  2. Update the Hub's key and `HUB_WEBHOOK_KEY` (on Vercel and in GitHub).
+  3. Set `MSKU_API_KEYS` to `<new>` and redeploy.
 
 ## Conventions
 
@@ -28,8 +28,9 @@ in code, chat, Slack or email.
 - Timestamps are ISO 8601 in UTC with milliseconds: `2026-10-26T18:04:05.123Z`.
 - Money is a plain number (`49.95`). **Every price has a `<price>_currency` field right after it**: `USD`, `CAD`,
   `EUR` or `GBP`. CA and EU prices are as the price list holds them; nothing is converted.
-- **UK prices** (`msrp_uk`, `wholesale_uk`, `distro_uk`) are the US numbers in GBP (Ken, 2026-10-27). They follow
-  the US prices and are read-only.
+- **UK prices** (`msrp_uk`, `wholesale_uk`, `distro_uk`, GBP): until the Hub sets one, it equals the US figure in
+  pounds and follows US changes. Once the Hub sets one, it keeps its own value. Setting it to `null` makes it follow
+  the US figure again.
 - Quantities are whole numbers. Dimensions and weights are text with units (`"4.5 x 2 x 1 in"`, `"3.2 oz"`). Values
   that come from the sheets are shown in mm, g and kg.
 - Nothing is deleted. To retire a SKU, set `"status": "obsolete"`.
@@ -78,6 +79,8 @@ curl -H "x-api-key: $KEY" "https://<base>/skus/GPM-001-APZZ-Inner%20Pack"
   "msrp": 499.5, "msrp_currency": "USD", "wholesale": 300.0, "wholesale_currency": "USD",
   "distro": 255.0, "distro_currency": "USD", "distro_eu": 255.0, "distro_eu_currency": "EUR",
   "distro_ca": 357.0, "distro_ca_currency": "CAD",
+  "msrp_uk": 499.5, "msrp_uk_currency": "GBP", "wholesale_uk": 300.0, "wholesale_uk_currency": "GBP",
+  "distro_uk": 255.0, "distro_uk_currency": "GBP",
   "pack_size": 10,
   "product_dims": "145 x 107.5 x 73 mm", "product_weight": "1.007 kg",
   "packaging_dims": null, "packaged_weight": null,
@@ -89,8 +92,6 @@ curl -H "x-api-key: $KEY" "https://<base>/skus/GPM-001-APZZ-Inner%20Pack"
   "map": null, "map_currency": "USD",
   "msrp_ca": 699.5, "msrp_ca_currency": "CAD", "msrp_eu": 499.5, "msrp_eu_currency": "EUR",
   "wholesale_ca": 420.0, "wholesale_ca_currency": "CAD", "wholesale_eu": 300.0, "wholesale_eu_currency": "EUR",
-  "msrp_uk": 499.5, "msrp_uk_currency": "GBP", "wholesale_uk": 300.0, "wholesale_uk_currency": "GBP",
-  "distro_uk": 255.0, "distro_uk_currency": "GBP",
   "cin7_id": "GPM-001-APZZ-Inner Pack", "store_url": null, "asset_url": null,
   "updated_at": "2026-10-22T23:05:05.315Z",
   "updated_by": "ken"
@@ -179,7 +180,7 @@ curl -H "x-api-key: $KEY" "https://<base>/changes?since=2026-10-26T00:00:00Z"
 | `brand` | An existing brand: G Pen, Stündenglass, ... (`400` lists them) |
 | `status` | `draft`, `active`, `deprecated` or `obsolete` |
 | `upc` | Text, digits only, 8–14 digits (text, so leading zeros survive) |
-| `msrp`, `wholesale`, `distro`, `distro_eu`, `distro_ca` | Number from 0 to 1,000,000, at most 2 decimals, or `null` |
+| `msrp`, `wholesale`, `distro`, `distro_eu`, `distro_ca`, `msrp_uk`, `wholesale_uk`, `distro_uk` | Number from 0 to 1,000,000, at most 2 decimals, or `null` |
 | `pack_size`, `case_pack`, `pallet_qty` | Whole number, or `null` |
 | dims, weights | Text up to 100 characters; `notes` up to 5,000 |
 | `tier`, `updated_by`, every `_currency`, and the read-only fields below | Read-only (`400` if sent) |
@@ -191,6 +192,7 @@ curl -H "x-api-key: $KEY" "https://<base>/changes?since=2026-10-26T00:00:00Z"
 | `sku`, `name`, `brand`, `upc` | `core.sku` | `core.sku` + a Hub lock |
 | `msrp` / `wholesale` / `distro` | current US MSRP / wholesale / distribution price | a new effective-dated price row + a Hub lock |
 | `distro_eu` / `distro_ca` | current EU (EUR) / CA (CAD) distribution price | same |
+| `msrp_uk` / `wholesale_uk` / `distro_uk` | the Hub's UK price (GBP); if none, the US figure in pounds | a UK price row + a Hub lock; `null` = follow US again |
 | `status` | the Hub's value; otherwise Tier 1 → `active`, Tier 2 → `deprecated`, Tier 3 → `obsolete`, new or untiered → `draft` | `core.sku_spec` |
 | `pack_size` | the Hub's value; else the code (single unit or kit = 1, `-10` = 10); else, for a POP or master case, the unit count recorded on its single-unit SKU | `core.sku_spec` |
 | `product_dims` / `product_weight`, `packaging_dims` / `packaged_weight` | the Hub's value; else the sheets' "unit" measurements (see the note below) | `core.sku_spec` |
@@ -200,7 +202,6 @@ curl -H "x-api-key: $KEY" "https://<base>/changes?since=2026-10-26T00:00:00Z"
 | `family`, `category`, `hts_code`, `country_of_origin`, `producer` | the sheets | read-only |
 | `map` | current US MAP (only the 5 Gravity Infuser V3 SKUs have one) | read-only |
 | `msrp_ca`, `wholesale_ca` / `msrp_eu`, `wholesale_eu` | current CA (CAD) / EU (EUR) prices | read-only |
-| `msrp_uk`, `wholesale_uk`, `distro_uk` | the US numbers, in GBP | read-only |
 | `cin7_id` | the SKU as Cin7 knows it (Cin7 exports identify products by SKU); `null` if not in Cin7 | read-only |
 | `store_url`, `asset_url` | store page and asset portal links. **No source supplies them yet, so they're `null`** | read-only |
 | `<price>_currency` | the price's region: USD, CAD, EUR, GBP | read-only |
@@ -216,6 +217,30 @@ tab of the outputs sheet for Ken:
 
 Every write is logged in `ops.audit_log` with the full before and after, `changed_by` and the time. `/changes` reads
 that log.
+
+## Webhook to the Hub
+
+After every write that changes something, the API tells the Hub which SKUs changed, so an edit shows up in both places
+straight away:
+
+```
+POST https://gpen-crm.vercel.app/api/master-sku/changed
+x-api-key: <HUB_WEBHOOK_KEY>
+Content-Type: application/json
+
+{"skus": ["GPM-001-APZZ"], "changed_at": "2026-10-27T18:04:05.123Z"}
+```
+
+- **One ping per write:**
+  - a Hub `POST /skus`, or a `PATCH` that changed something: one SKU, with its new `updated_at`
+  - a sheet sync (`python -m msku sync` / `import`, including Ken's Conflicts decisions it applies): every SKU the
+    run changed, in one ping
+- **No ping for:** a dry run, a `409`, a `PATCH` that changed nothing, or a sync that changed nothing.
+- **Fire and forget:** a 5-second timeout, and a failure is only logged (without the key), never returned as an error.
+  The Hub re-checks every 15 minutes, using `GET /skus?updated_since=`, as a backstop.
+- **Set up:** `HUB_WEBHOOK_KEY` is needed on the Vercel project (for Hub writes) and as a GitHub Actions secret (for
+  the daily sync). The sync only pings when it updates the real database (`MSKU_DATABASE_URL` set), never a throwaway
+  rebuild. Code: `msku/webhook.py`.
 
 ## Deploying
 
@@ -234,8 +259,8 @@ use `requirements-dev.txt`.
 
 - `DATABASE_URL`: set by the Neon integration.
 - `MSKU_API_DATABASE_URL`: printed by `python -m msku hub-login`.
-- `MSKU_API_KEY`: the Hub's key.
-- `MSKU_API_KEY_PREVIOUS`: optional, used only while rotating.
+- `MSKU_API_KEYS`: the Hub's key (`<new>,<old>` while rotating).
+- `HUB_WEBHOOK_KEY`: the same key, sent to the Hub with each ping.
 
 **One-time setup** (from a computer with the repo, Python 3.11+ and the Vercel CLI):
 
@@ -251,5 +276,5 @@ set -a && . ./.env.local && set +a
 
 Then load the data with `python -m msku sync`. It needs the Google service account key; see docs/HOSTING.md.
 
-**Local development:** `MSKU_API_KEY=dev python -m msku serve` runs the API on `http://localhost:8080` over plain
+**Local development:** `MSKU_API_KEYS=dev python -m msku serve` runs the API on `http://localhost:8080` over plain
 HTTP, against the local database. It's for development only; never expose it.

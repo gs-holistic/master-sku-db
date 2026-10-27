@@ -30,6 +30,8 @@ def api(monkeypatch):
     monkeypatch.setenv("MSKU_API_KEY", KEY)
     monkeypatch.setenv("MSKU_API_KEY_PREVIOUS", f"old-key-{'y' * 40}")
     monkeypatch.delenv("MSKU_ALLOW_HTTP", raising=False)
+    monkeypatch.delenv("HUB_WEBHOOK_KEY", raising=False)
+    monkeypatch.delenv("MSKU_API_KEYS", raising=False)
     yield conn
     conn.close()
     with psycopg.connect(ADMIN, autocommit=True) as a:
@@ -267,6 +269,14 @@ def test_refuses_to_run_without_its_own_login(api, monkeypatch):
     assert status == 503 and "MSKU_API_DATABASE_URL" in r["error"]
 
 
+def test_msku_api_keys_list(api, monkeypatch):
+    monkeypatch.delenv("MSKU_API_KEY")
+    monkeypatch.delenv("MSKU_API_KEY_PREVIOUS")
+    monkeypatch.setenv("MSKU_API_KEYS", f"new-key-{'z' * 40}, {KEY}")
+    assert call("GET", "/health")[0] == 200 and call("GET", "/health", key="new-key-" + "z" * 40)[0] == 200
+    assert call("GET", "/health", key="old-key-" + "y" * 40)[0] == 401
+
+
 def test_only_the_current_and_previous_keys_work(api, monkeypatch):
     monkeypatch.delenv("MSKU_API_KEY_PREVIOUS")
     assert call("GET", "/health", key="old-key-" + "y" * 40)[0] == 401
@@ -290,11 +300,24 @@ def test_every_price_has_its_currency_next_to_it(api):
            ("USD", "EUR", "CAD", "GBP")
 
 
-def test_uk_prices_are_the_us_numbers_in_pounds(api):
+def test_uk_prices_follow_us_until_the_hub_sets_them(api):
     r = sku("GPM-001-APZZ")
     assert (r["msrp_uk"], r["wholesale_uk"], r["distro_uk"]) == (r["msrp"], r["wholesale"], r["distro"]) == (99.95, 60.0, 51.0)
-    call("PATCH", "/skus/GPM-001-APZZ", {"updated_at": r["updated_at"], "msrp": 109.95, "changed_by": WHO})
-    assert sku("GPM-001-APZZ")["msrp_uk"] == 109.95
+    r = call("PATCH", "/skus/GPM-001-APZZ", {"updated_at": r["updated_at"], "msrp": 109.95, "changed_by": WHO})[1]
+    assert r["msrp_uk"] == 109.95                                    # follows the US figure
+    r = call("PATCH", "/skus/GPM-001-APZZ", {"updated_at": r["updated_at"], "msrp_uk": 89.0, "changed_by": WHO})[1]
+    assert r["msrp_uk"] == 89.0 and r["msrp_uk_currency"] == "GBP" and r["msrp"] == 109.95
+    r = call("PATCH", "/skus/GPM-001-APZZ", {"updated_at": r["updated_at"], "msrp": 119.95, "changed_by": WHO})[1]
+    assert r["msrp_uk"] == 89.0                                      # set in the Hub: no longer follows
+    r = call("PATCH", "/skus/GPM-001-APZZ", {"updated_at": r["updated_at"], "msrp_uk": None, "changed_by": WHO})[1]
+    assert r["msrp_uk"] == 119.95                                    # cleared: follows again
+
+
+def test_sync_keeps_hub_uk_prices(api):
+    r = sku("GPM-001-APZZ")
+    call("PATCH", "/skus/GPM-001-APZZ", {"updated_at": r["updated_at"], "wholesale_uk": 55.0, "changed_by": WHO})
+    st = resync(api)
+    assert sku("GPM-001-APZZ")["wholesale_uk"] == 55.0 and st["prices_closed"] == 0
 
 
 def test_extra_read_only_fields(api):
@@ -310,9 +333,9 @@ def test_extra_read_only_fields(api):
 
 def test_read_only_fields_are_refused(api):
     s = sku("GPM-001-APZZ")
-    status, r = call("PATCH", "/skus/GPM-001-APZZ", {"updated_at": s["updated_at"], "msrp_uk": 1, "map": 2,
+    status, r = call("PATCH", "/skus/GPM-001-APZZ", {"updated_at": s["updated_at"], "msrp_ca": 1, "map": 2,
                                                     "msrp_currency": "GBP", "cin7_id": "X", "changed_by": WHO})
-    assert status == 400 and set(r["fields"]) == {"msrp_uk", "map", "msrp_currency", "cin7_id"}
+    assert status == 400 and set(r["fields"]) == {"msrp_ca", "map", "msrp_currency", "cin7_id"}
     assert all(m.startswith("read-only") for m in r["fields"].values())
 
 
@@ -321,3 +344,73 @@ def test_changes_include_the_uk_mirror(api):
     call("PATCH", "/skus/GPM-001-APZZ", {"updated_at": s["updated_at"], "wholesale": 61.0, "changed_by": WHO})
     got = {(c["field"], c["new_value"]) for c in call("GET", "/changes", query={"since": s["updated_at"]})[1]["changes"]}
     assert {("wholesale", 61.0), ("wholesale_uk", 61.0)} <= got
+
+
+# ---------- pinging the Hub
+
+@pytest.fixture()
+def hub(monkeypatch):
+    """A stand-in for the Hub's /api/master-sku/changed that records every ping."""
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+    pings = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            pings.append({"key": self.headers["x-api-key"], "path": self.path, **body})
+            self.send_response(200)
+            self.end_headers()
+
+        def log_message(self, *a):
+            pass
+
+    server = HTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    monkeypatch.setenv("HUB_WEBHOOK_URL", f"http://127.0.0.1:{server.server_port}/api/master-sku/changed")
+    monkeypatch.setenv("HUB_WEBHOOK_KEY", "hub-key")
+    yield pings
+    server.shutdown()
+
+
+def test_patch_pings_the_hub_once(api, hub):
+    s = sku("GPM-001-APZZ")
+    r = call("PATCH", "/skus/GPM-001-APZZ", {"updated_at": s["updated_at"], "notes": "x", "changed_by": WHO})[1]
+    assert hub == [{"key": "hub-key", "path": "/api/master-sku/changed", "skus": ["GPM-001-APZZ"],
+                    "changed_at": r["updated_at"]}]
+    call("PATCH", "/skus/GPM-001-APZZ", {"updated_at": r["updated_at"], "notes": "x", "changed_by": WHO})
+    assert len(hub) == 1                      # nothing changed: no ping
+    call("PATCH", "/skus/GPM-001-APZZ", {"updated_at": s["updated_at"], "notes": "y", "changed_by": WHO})
+    assert len(hub) == 1                      # 409: no ping
+
+
+def test_create_pings_the_hub(api, hub):
+    call("POST", "/skus", {"sku": "GPN-123-APZZ", "changed_by": WHO})
+    assert [p["skus"] for p in hub] == [["GPN-123-APZZ"]]
+    call("POST", "/skus", {"sku": "GPN-123-APZZ", "changed_by": WHO})   # 409
+    assert len(hub) == 1
+
+
+def test_a_sync_sends_one_ping_with_every_sku_it_touched(api, hub):
+    src = sources()
+    src["prices"]["tabs"]["GP US WS"][5][4] = "$65.00"     # one wholesale price changes
+    db.load(api, consolidate(src), src, "ken")
+    assert [p["skus"] for p in hub] == [["GPM-001-APZZ"]]
+    db.load(api, consolidate(src), src, "ken")             # nothing changed: no ping
+    db.load(api, consolidate(sources()), sources(), "ken", dry_run=True)
+    assert len(hub) == 1
+
+
+def test_a_hub_that_is_down_never_fails_the_write(api, monkeypatch):
+    monkeypatch.setenv("HUB_WEBHOOK_KEY", "hub-key")
+    monkeypatch.setenv("HUB_WEBHOOK_URL", "http://127.0.0.1:9/nothing-listens-here")
+    s = sku("GPM-001-APZZ")
+    status, r = call("PATCH", "/skus/GPM-001-APZZ", {"updated_at": s["updated_at"], "notes": "x", "changed_by": WHO})
+    assert status == 200 and r["notes"] == "x"
+
+
+def test_no_key_no_ping(api, hub, monkeypatch):
+    monkeypatch.delenv("HUB_WEBHOOK_KEY")
+    s = sku("GPM-001-APZZ")
+    call("PATCH", "/skus/GPM-001-APZZ", {"updated_at": s["updated_at"], "notes": "x", "changed_by": WHO})
+    assert hub == []

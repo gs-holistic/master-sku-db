@@ -9,7 +9,7 @@
   outputs                 read decisions from, then rewrite, the "Master SKU Database – Outputs" sheet
   sync [--dry-run]        fetch + read decisions + import + rewrite the outputs sheet (the normal routine)
   serve [--port N]        run the G Pen Hub API locally over plain HTTP (development only; see docs/HUB_API.md)
-  new-api-key             print a new random key for MSKU_API_KEY
+  new-api-key             print a new random key for MSKU_API_KEYS and HUB_WEBHOOK_KEY
   hub-login               create (or give a new password to) the API's database login, which can't see costs,
                           and print the URL for MSKU_API_DATABASE_URL. Run with the owner's DATABASE_URL.
 """

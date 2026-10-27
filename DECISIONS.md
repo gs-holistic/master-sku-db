@@ -107,3 +107,9 @@
 - **Read-only extras in GET /skus:** family, category, hts_code, country_of_origin, producer, map (US), msrp_ca, msrp_eu, wholesale_ca, wholesale_eu, cin7_id, store_url, asset_url. `cin7_id` is the SKU as Cin7 exports it. No source supplies `country_of_origin`, `store_url` or `asset_url` yet, so they're null.
 - **The API connects as `msku_hub_api_login`**, which has no access to the cost schema (`MSKU_API_DATABASE_URL`, made by `python -m msku hub-login`). It never falls back to the owner's `DATABASE_URL`.
 - **Hosting:** Vercel, team grenco-medical, with Neon Postgres (Ken). `requirements.txt` holds only what the API needs; the sync and tests use `requirements-dev.txt`.
+
+## 2026-10-27: UK prices editable, and the Hub is pinged on every change (from Jordan via Ken)
+
+- **UK prices are editable in the Hub.** `msrp_uk`, `wholesale_uk` and `distro_uk` (GBP) are stored as UK-region prices (migration 011). Until the Hub sets one, it equals the US figure and follows it; `null` makes it follow again. The sheets have no UK prices, so the sync never touches them.
+- **Webhook:** after each write that changes something, one POST goes to `https://gpen-crm.vercel.app/api/master-sku/changed` with `{"skus": [...], "changed_at": ...}` and `x-api-key: HUB_WEBHOOK_KEY`. A sync sends one ping with every SKU it changed. Fire and forget: 5-second timeout, failures are only logged. The Hub re-checks every 15 minutes.
+- **The key variable is `MSKU_API_KEYS`** (`<new>,<old>` while rotating), as Jordan specified. `MSKU_API_KEY` and `MSKU_API_KEY_PREVIOUS` still work.

@@ -7,6 +7,8 @@ name: Sync and publish
 #   secret   GOOGLE_SERVICE_ACCOUNT_JSON  required: the service-account key file contents
 #   secret   MSKU_DATABASE_URL            optional: a permanent Postgres. Without it the database is
 #                                         rebuilt from the sheets on every run (no price/tier/cost history).
+#   secret   HUB_WEBHOOK_KEY              optional: the Hub's key. With MSKU_DATABASE_URL set, each run pings
+#                                         the G Pen Hub once with every SKU it changed (msku/webhook.py).
 #   variable PUBLISH_PAGES = true         only once GitHub Pages for this repo is private to the org.
 #                                         The page shows wholesale/distribution prices and stock.
 
@@ -47,6 +49,7 @@ jobs:
         env:
           KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           DB: ${{ secrets.MSKU_DATABASE_URL }}
+          HUB: ${{ secrets.HUB_WEBHOOK_KEY }}
         run: |
           if [ -z "$KEY" ]; then echo "::error::Secret GOOGLE_SERVICE_ACCOUNT_JSON is not set"; exit 1; fi
           umask 077
@@ -56,6 +59,8 @@ jobs:
           if [ -n "$DB" ]; then
             echo "::add-mask::$DB"
             echo "MSKU_DATABASE_URL=$DB" >> "$GITHUB_ENV"
+            # Only the real database pings the Hub, never a throwaway rebuild
+            if [ -n "$HUB" ]; then echo "::add-mask::$HUB"; echo "HUB_WEBHOOK_KEY=$HUB" >> "$GITHUB_ENV"; fi
           else
             echo "::notice::No MSKU_DATABASE_URL secret: rebuilding the database from the sheets (no history kept)."
             echo "MSKU_DATABASE_URL=postgresql://postgres@localhost:5432/master_sku?sslmode=disable" >> "$GITHUB_ENV"

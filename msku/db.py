@@ -14,7 +14,11 @@ PACK_LEVELS = ("unit", "inner_pack", "master_case", "pallet")
 
 # Hub API field -> current price row (region, tier). The Hub's price fields, shared with hub_api.
 HUB_PRICE_FIELDS = {"msrp": ("US", "msrp"), "wholesale": ("US", "wholesale"), "distro": ("US", "distribution"),
-                    "distro_eu": ("EU", "distribution"), "distro_ca": ("CA", "distribution")}
+                    "distro_eu": ("EU", "distribution"), "distro_ca": ("CA", "distribution"),
+                    "msrp_uk": ("UK", "msrp"), "wholesale_uk": ("UK", "wholesale"), "distro_uk": ("UK", "distribution")}
+# Tables whose changes mean "this SKU changed" for the Hub (its record, /changes, the webhook).
+SKU_TABLES = ("core.sku", "core.sku_spec", "core.price", "core.sku_tier", "core.sku_packaging_level",
+              "core.external_id", "core.sku_link")
 
 
 def connect():
@@ -59,12 +63,19 @@ def load(conn, model, sources, actor, dry_run=False):
                                    GROUP BY 1, 2 ORDER BY 1, 2""", (audit_start,)).fetchall()
             stats["changes"] = {f"{t} {a.lower()}": n for t, a, n in rows if not t.startswith("ops.")}
             stats["conflict_changes"] = {a.lower(): n for t, a, n in rows if t == "ops.conflict"}
+            changed = [r[0] for r in conn.execute(
+                """SELECT DISTINCT s.code FROM ops.audit_log a JOIN core.sku s ON s.id::text = a.sku_key
+                   WHERE a.id > %s AND a.table_name = ANY(%s)""", (audit_start, list(SKU_TABLES)))]
+            stats["skus_changed"] = len(changed)
             conn.execute("UPDATE ops.import_run SET finished_at = now(), stats = %s WHERE id = %s", (Jsonb(stats), run_id))
             if dry_run:
                 raise Rollback
     except Rollback:
         pass
     conn.commit()
+    if not dry_run:
+        from .webhook import notify
+        notify(changed)   # one ping for the whole run
     return stats
 
 
@@ -249,7 +260,7 @@ def _load(conn, m, run_id, read_at):
                         (*key, p["currency"], amount, today if old else read_at, p["source"], p["ref"]))
             opened += 1
         for key, old in cur_prices.items():   # no longer on the price list (unless the Hub set it)
-            if key not in seen and key not in hub_keys:
+            if key not in seen and key not in hub_keys and key[1] != "UK":   # UK prices only come from the Hub
                 cur.execute("UPDATE core.price SET effective_to = %s WHERE id = %s", (today, old[0]))
                 closed += 1
     st["prices_opened"], st["prices_closed"] = opened, closed

@@ -5,8 +5,9 @@ Docs: docs/HUB_API.md. Configuration, all from the environment, never from code:
 
   MSKU_API_DATABASE_URL  Postgres login in the msku_hub_api role, which can't see costs (python -m msku hub-login).
                          Never the owner's DATABASE_URL: the API refuses to start without this one.
-  MSKU_API_KEY           the x-api-key the Hub sends (python -m msku new-api-key)
-  MSKU_API_KEY_PREVIOUS  optional: the old key, still accepted while rotating
+  MSKU_API_KEYS          the x-api-key the Hub sends (python -m msku new-api-key). "new,old" while rotating.
+                         (MSKU_API_KEY and MSKU_API_KEY_PREVIOUS are read too.)
+  HUB_WEBHOOK_KEY        the key sent to the Hub when SKUs change (see msku/webhook.py)
   MSKU_ALLOW_HTTP=1      local development only: accept plain HTTP
 """
 import hmac
@@ -20,7 +21,8 @@ from urllib.parse import parse_qs
 import psycopg
 from psycopg.rows import dict_row
 
-from .db import HUB_PRICE_FIELDS
+from .db import HUB_PRICE_FIELDS, SKU_TABLES
+from .webhook import notify
 from .rules import check_code
 
 STATUSES = ("draft", "active", "deprecated", "obsolete")
@@ -31,7 +33,7 @@ SPEC_TEXT = ("notes", "product_dims", "product_weight", "packaging_dims", "packa
 READ_PRICE_FIELDS = {"map": ("US", "map"), "msrp_ca": ("CA", "msrp"), "msrp_eu": ("EU", "msrp"),
                      "wholesale_ca": ("CA", "wholesale"), "wholesale_eu": ("EU", "wholesale")}
 ALL_PRICE_FIELDS = {**HUB_PRICE_FIELDS, **READ_PRICE_FIELDS}
-# UK prices are the US numbers in pounds sterling (Ken, 2026-10-27). Derived, so read-only.
+# A UK price the Hub hasn't set shows the US figure, in pounds (Ken, 2026-10-27).
 UK_FROM_US = {"msrp_uk": "msrp", "wholesale_uk": "wholesale", "distro_uk": "distro"}
 CURRENCY = {"US": "USD", "CA": "CAD", "EU": "EUR", "UK": "GBP"}
 EXTRA = ("family", "category", "hts_code", "country_of_origin", "producer")
@@ -47,12 +49,11 @@ FIELDS = ("sku", "name", "brand", "status", "upc", *_with_currency(HUB_PRICE_FIE
           "case_pack", "case_dims", "case_weight", "pallet_qty", "pallet_dims", "pallet_weight",
           "notes",
           # read-only
-          "tier", *EXTRA, *_with_currency((*READ_PRICE_FIELDS, *UK_FROM_US)), *LINKS,
+          "tier", *EXTRA, *_with_currency(READ_PRICE_FIELDS), *LINKS,
           "updated_at", "updated_by")
 READ_ONLY = set(FIELDS) - {"sku", *WRITABLE, "updated_at"}
 TIER_STATUS = {1: "active", 2: "deprecated", 3: "obsolete"}
-AUDITED = ("core.sku", "core.sku_spec", "core.price", "core.sku_tier", "core.sku_packaging_level",
-           "core.external_id", "core.sku_link")
+AUDITED = SKU_TABLES
 EMAIL = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
 MAX_BODY = 64 * 1024
 
@@ -184,8 +185,7 @@ def record(r):
         "upc": r["upc"],
         **{f: _money(r[f]) for f in ALL_PRICE_FIELDS},
         **{f"{f}_currency": CURRENCY[region] for f, (region, _) in ALL_PRICE_FIELDS.items()},
-        **{uk: _money(r[us]) for uk, us in UK_FROM_US.items()},
-        **{f"{uk}_currency": "GBP" for uk in UK_FROM_US},
+        **{uk: _money(r[uk] if r[uk] is not None else r[us]) for uk, us in UK_FROM_US.items()},
         **{f: r[f] for f in (*EXTRA, *LINKS)},
         "pack_size": _pack_size(r),
         **{f: r[f] if r[f] is not None else d[f] for f in d},
@@ -252,8 +252,7 @@ def validate(conn, body, creating, code=None):
         elif k in READ_ONLY:
             errors[k] = "read-only" + {"updated_by": "; send changed_by instead",
                                        "tier": ": the tier comes from the price list and Cin7 stock"}.get(
-                k, ": UK prices follow the US prices" if k.endswith("_uk") else
-                ": set by the price's region" if k.endswith("_currency") else ": comes from the sheets and Cin7")
+                k, ": set by the price's region" if k.endswith("_currency") else ": comes from the sheets and Cin7")
         elif k not in WRITABLE:
             errors[k] = "unknown field"
         elif k == "name":
@@ -344,7 +343,7 @@ def _set_price(cur, sku_id, field, amount, by):
     if amount is not None:
         cur.execute("""INSERT INTO core.price (sku_id, region, tier, currency, amount, effective_from, source, source_ref)
                        VALUES (%s, %s, %s, %s, %s, %s, 'G Pen Hub', %s)""",
-                    (sku_id, region, tier, {"US": "USD", "EU": "EUR", "CA": "CAD"}[region], amount, today, by))
+                    (sku_id, region, tier, CURRENCY[region], amount, today, by))
     return True
 
 
@@ -385,7 +384,9 @@ def create(conn, body):
         if sku_id is None:   # created by someone else a moment ago
             raise Reply(409, {"error": f"SKU {values['sku']} already exists", "current": fetch_one(conn, values["sku"])})
         apply(conn, sku_id[0], values, by, creating=True)
-        return fetch_one(conn, values["sku"])
+        created = fetch_one(conn, values["sku"])
+    notify([created["sku"]], created["updated_at"])   # after the commit
+    return created
 
 
 def update(conn, code, body):
@@ -404,7 +405,10 @@ def update(conn, code, body):
                               "current": current})
         conn.execute("SELECT set_config('msku.actor', %s, true)", (by,))
         apply(conn, row[0], values, by)
-        return fetch_one(conn, code)
+        after = fetch_one(conn, code)
+    if after["updated_at"] != current["updated_at"]:   # a PATCH that changed nothing doesn't ping
+        notify([code], after["updated_at"])
+    return after
 
 
 # ---------- history
@@ -488,7 +492,13 @@ def changes(conn, since=None, cursor=None, limit=500):
             old, new = _level_fields(before), _level_fields(after)
             sku_id = (after or before)["sku_id"]   # a value the Hub set hides what the sheets say
             pairs = [(f, old.get(f), new.get(f)) for f in sorted(set(old) | set(new)) if (sku_id, f) not in spec_set]
-        pairs += [(_UK_OF[f], old, new) for f, old, new in pairs if f in _UK_OF and r["table_name"] == "core.price"]
+        if r["table_name"] == "core.price" and pairs and pairs[0][0] in _UK_OF:
+            # A UK price the Hub hasn't set follows the US one, so it changed too
+            own = conn.execute("""SELECT 1 FROM core.price WHERE sku_id = %s AND region = 'UK' AND tier = %s
+                                  AND effective_from <= %s::date AND (effective_to IS NULL OR effective_to > %s::date)""",
+                               (p["sku_id"], p["tier"], r["at"], r["at"])).fetchone()
+            if not own:
+                pairs += [(_UK_OF[f], old, new) for f, old, new in pairs]
         for field, old, new in pairs:
             if old != new and not (r["table_name"] == "core.sku" and r["action"] == "INSERT" and new is None):
                 out.append({"sku": r["code"], "field": field, "old_value": old, "new_value": new,
@@ -500,8 +510,9 @@ def changes(conn, since=None, cursor=None, limit=500):
 # ---------- HTTP
 
 def _keys():
-    return [os.environ.get(v, "").strip() for v in ("MSKU_API_KEY", "MSKU_API_KEY_PREVIOUS")
-            if os.environ.get(v, "").strip()]
+    keys = os.environ.get("MSKU_API_KEYS", "").split(",")   # "new,old" while rotating
+    keys += [os.environ.get("MSKU_API_KEY", ""), os.environ.get("MSKU_API_KEY_PREVIOUS", "")]
+    return [k.strip() for k in keys if k.strip()]
 
 
 def _authorised(environ):
