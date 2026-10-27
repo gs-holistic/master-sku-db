@@ -16,3 +16,5 @@ __pycache__/
 master-sku-preview.html
 /.pgdata
 *.bundle
+.vercel
+.env*

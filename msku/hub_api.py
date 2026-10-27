@@ -556,8 +556,10 @@ def _connect():
 def route(environ):
     method = environ["REQUEST_METHOD"]
     path = environ.get("PATH_INFO", "").encode("latin-1").decode("utf-8", "replace")
-    path = re.sub(r"^/api/index(?=/|$)", "", path).rstrip("/") or "/"   # Vercel's rewrite target
     query = {k: v[-1] for k, v in parse_qs(environ.get("QUERY_STRING", "")).items()}
+    # On Vercel every request arrives as /api/index; vercel.json passes the path the caller asked for as __path
+    path = query.pop("__path", None) or path
+    path = re.sub(r"^/api/index(?=/|$)", "", path).rstrip("/") or "/"
     parts = path.split("/")[1:]
 
     if parts == ["health"]:
