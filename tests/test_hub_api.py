@@ -25,8 +25,10 @@ def api(monkeypatch):
     conn = psycopg.connect(url)
     db.migrate(conn)
     db.load(conn, consolidate(sources()), sources(), "ken")
-    monkeypatch.setenv("MSKU_DATABASE_URL", url)
-    monkeypatch.setenv("MSKU_API_KEYS", f"old-key-{'y' * 40}, {KEY}")
+    # The API connects as its own login (msku_hub_api), exactly as deployed, never as the owner.
+    monkeypatch.setenv("MSKU_API_DATABASE_URL", db.hub_login(conn, url.replace("?host=", "?sslmode=disable&host=")))
+    monkeypatch.setenv("MSKU_API_KEY", KEY)
+    monkeypatch.setenv("MSKU_API_KEY_PREVIOUS", f"old-key-{'y' * 40}")
     monkeypatch.delenv("MSKU_ALLOW_HTTP", raising=False)
     yield conn
     conn.close()
@@ -144,8 +146,8 @@ def test_patch_changes_only_what_is_sent(api):
                                                     "notes": "New box in Q1", "changed_by": WHO})
     assert status == 200
     assert r["msrp"] == 109.95 and r["notes"] == "New box in Q1" and r["updated_by"] == WHO
-    assert {k: v for k, v in r.items() if k not in ("msrp", "notes", "updated_at", "updated_by")} == \
-           {k: v for k, v in before.items() if k not in ("msrp", "notes", "updated_at", "updated_by")}
+    changed = ("msrp", "msrp_uk", "notes", "updated_at", "updated_by")   # msrp_uk follows msrp
+    assert {k: v for k, v in r.items() if k not in changed} == {k: v for k, v in before.items() if k not in changed}
     hist = api.execute("""SELECT amount, effective_to IS NULL, source, source_ref FROM core.price p JOIN core.sku s ON s.id = p.sku_id
                           WHERE s.code = 'GPM-001-APZZ' AND region = 'US' AND tier = 'msrp' ORDER BY p.id""").fetchall()
     assert [(float(a), cur) for a, cur, *_ in hist] == [(99.95, False), (109.95, True)]
@@ -247,3 +249,75 @@ def test_sync_is_still_idempotent_with_hub_data(api):
     resync(api)
     st = resync(api)
     assert st["changes"] == {} and st["prices_opened"] == 0
+
+
+# ---------- deployment settings
+
+def test_the_api_login_cannot_read_costs(api, monkeypatch):
+    import os
+    with psycopg.connect(os.environ["MSKU_API_DATABASE_URL"]) as c:
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            c.execute("SELECT count(*) FROM cost.unit_cost")
+
+
+def test_refuses_to_run_without_its_own_login(api, monkeypatch):
+    monkeypatch.delenv("MSKU_API_DATABASE_URL")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://owner@/x")
+    status, r = call("GET", "/health")
+    assert status == 503 and "MSKU_API_DATABASE_URL" in r["error"]
+
+
+def test_only_the_current_and_previous_keys_work(api, monkeypatch):
+    monkeypatch.delenv("MSKU_API_KEY_PREVIOUS")
+    assert call("GET", "/health", key="old-key-" + "y" * 40)[0] == 401
+    assert call("GET", "/health")[0] == 200
+
+
+def test_vercel_rewrite_path(api):
+    assert call("GET", "/api/index/health") == (200, {"ok": True})
+    assert call("GET", "/api/index/skus/GPM-001-APZZ")[1]["sku"] == "GPM-001-APZZ"
+
+
+# ---------- currencies and read-only extras
+
+def test_every_price_has_its_currency_next_to_it(api):
+    r = sku("SG4-KIT-STGR-02")
+    fields = list(r)
+    for f in ("msrp", "wholesale", "distro", "distro_eu", "distro_ca", "map", "msrp_ca", "msrp_eu",
+              "wholesale_ca", "wholesale_eu", "msrp_uk", "wholesale_uk", "distro_uk"):
+        assert fields[fields.index(f) + 1] == f + "_currency"
+    assert (r["msrp_currency"], r["distro_eu_currency"], r["distro_ca_currency"], r["msrp_uk_currency"]) == \
+           ("USD", "EUR", "CAD", "GBP")
+
+
+def test_uk_prices_are_the_us_numbers_in_pounds(api):
+    r = sku("GPM-001-APZZ")
+    assert (r["msrp_uk"], r["wholesale_uk"], r["distro_uk"]) == (r["msrp"], r["wholesale"], r["distro"]) == (99.95, 60.0, 51.0)
+    call("PATCH", "/skus/GPM-001-APZZ", {"updated_at": r["updated_at"], "msrp": 109.95, "changed_by": WHO})
+    assert sku("GPM-001-APZZ")["msrp_uk"] == 109.95
+
+
+def test_extra_read_only_fields(api):
+    r = sku("SG4-KIT-STGR-02")
+    assert r["producer"] == "Dongguan Medica Tech" and r["cin7_id"] is None
+    assert r["map"] == 449.95 and r["msrp"] == 499.95 and r["msrp_ca"] is None   # V3: CA MSRP not given yet
+    g = sku("GPM-001-APZZ")
+    assert (g["msrp_ca"], g["msrp_eu"], g["wholesale_ca"], g["wholesale_eu"], g["map"]) == (99.95, 99.95, 60.0, 60.0, None)
+    assert sku("GPM-001-APZZ")["cin7_id"] == "GPM-001-APZZ"
+    assert {"family", "category", "hts_code", "country_of_origin", "store_url", "asset_url"} <= set(r)
+    assert sku("GPM-001-APZZ")["hts_code"] == "8543.70.9940"
+
+
+def test_read_only_fields_are_refused(api):
+    s = sku("GPM-001-APZZ")
+    status, r = call("PATCH", "/skus/GPM-001-APZZ", {"updated_at": s["updated_at"], "msrp_uk": 1, "map": 2,
+                                                    "msrp_currency": "GBP", "cin7_id": "X", "changed_by": WHO})
+    assert status == 400 and set(r["fields"]) == {"msrp_uk", "map", "msrp_currency", "cin7_id"}
+    assert all(m.startswith("read-only") for m in r["fields"].values())
+
+
+def test_changes_include_the_uk_mirror(api):
+    s = sku("GPM-001-APZZ")
+    call("PATCH", "/skus/GPM-001-APZZ", {"updated_at": s["updated_at"], "wholesale": 61.0, "changed_by": WHO})
+    got = {(c["field"], c["new_value"]) for c in call("GET", "/changes", query={"since": s["updated_at"]})[1]["changes"]}
+    assert {("wholesale", 61.0), ("wholesale_uk", 61.0)} <= got

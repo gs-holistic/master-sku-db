@@ -99,3 +99,11 @@
 - `status` is new and belongs to the Hub. Until the Hub sets it, it follows the tier: 1 → active, 2 → deprecated, 3 → obsolete, new or untiered → draft. Setting it doesn't change the tier.
 - **Hosting is Jordan's call (Ken's choice).** The API is built and tested but not deployed. It needs a permanent Postgres and an HTTPS host. The key is generated on the host (`python -m msku new-api-key`) so it never passes through chat or email.
 - `distro_eu` and `distro_ca` are returned in EUR and CAD, as the price list holds them. No currency conversion.
+
+## 2026-10-27: Hub API before go-live (from Ken and Jordan)
+
+- **Every price has a `<price>_currency` field right after it** (USD, CAD, EUR, GBP). CA and EU prices stay in CAD and EUR, as the price list holds them.
+- **UK prices** (`msrp_uk`, `wholesale_uk`, `distro_uk`) are the US numbers in GBP (Ken: "price is same as USD but with lbs", read as pounds sterling). They're read-only and follow the US prices.
+- **Read-only extras in GET /skus:** family, category, hts_code, country_of_origin, producer, map (US), msrp_ca, msrp_eu, wholesale_ca, wholesale_eu, cin7_id, store_url, asset_url. `cin7_id` is the SKU as Cin7 exports it. No source supplies `country_of_origin`, `store_url` or `asset_url` yet, so they're null.
+- **The API connects as `msku_hub_api_login`**, which has no access to the cost schema (`MSKU_API_DATABASE_URL`, made by `python -m msku hub-login`). It never falls back to the owner's `DATABASE_URL`.
+- **Hosting:** Vercel, team grenco-medical, with Neon Postgres (Ken). `requirements.txt` holds only what the API needs; the sync and tests use `requirements-dev.txt`.

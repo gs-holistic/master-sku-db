@@ -9,7 +9,9 @@
   outputs                 read decisions from, then rewrite, the "Master SKU Database – Outputs" sheet
   sync [--dry-run]        fetch + read decisions + import + rewrite the outputs sheet (the normal routine)
   serve [--port N]        run the G Pen Hub API locally over plain HTTP (development only; see docs/HUB_API.md)
-  new-api-key             print a new random key for MSKU_API_KEYS
+  new-api-key             print a new random key for MSKU_API_KEY
+  hub-login               create (or give a new password to) the API's database login, which can't see costs,
+                          and print the URL for MSKU_API_DATABASE_URL. Run with the owner's DATABASE_URL.
 """
 import argparse
 import getpass
@@ -43,6 +45,7 @@ def main():
     p = sub.add_parser("serve")
     p.add_argument("--port", type=int, default=8080)
     sub.add_parser("new-api-key")
+    sub.add_parser("hub-login")
     a = ap.parse_args()
 
     if a.cmd == "new-api-key":
@@ -50,10 +53,14 @@ def main():
         # 48 random bytes, URL-safe: 64 characters. Printed once; paste it straight into the host's secrets.
         print(secrets.token_urlsafe(48))
         return
+    if a.cmd == "hub-login":
+        print(db.hub_login(db.connect(), os.environ.get("MSKU_DATABASE_URL") or os.environ["DATABASE_URL"]))
+        return
     if a.cmd == "serve":
         from wsgiref.simple_server import make_server
         from .hub_api import app
         os.environ["MSKU_ALLOW_HTTP"] = "1"
+        os.environ.setdefault("MSKU_API_DATABASE_URL", "postgresql://postgres@/master_sku?host=/tmp&port=5433")
         print(f"G Pen Hub API on http://localhost:{a.port} (development only: plain HTTP)")
         make_server("127.0.0.1", a.port, app).serve_forever()
         return

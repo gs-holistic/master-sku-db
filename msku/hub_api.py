@@ -3,9 +3,11 @@
 A WSGI app with no framework, so it runs on any host (gunicorn, Vercel's Python runtime, Cloud Run...).
 Docs: docs/HUB_API.md. Configuration, all from the environment, never from code:
 
-  MSKU_DATABASE_URL  Postgres connection (a login in the msku_hub_api role)
-  MSKU_API_KEYS      accepted x-api-key values, comma-separated. Two at once while rotating.
-  MSKU_ALLOW_HTTP=1  local development only: accept plain HTTP
+  MSKU_API_DATABASE_URL  Postgres login in the msku_hub_api role, which can't see costs (python -m msku hub-login).
+                         Never the owner's DATABASE_URL: the API refuses to start without this one.
+  MSKU_API_KEY           the x-api-key the Hub sends (python -m msku new-api-key)
+  MSKU_API_KEY_PREVIOUS  optional: the old key, still accepted while rotating
+  MSKU_ALLOW_HTTP=1      local development only: accept plain HTTP
 """
 import hmac
 import json
@@ -25,14 +27,32 @@ STATUSES = ("draft", "active", "deprecated", "obsolete")
 SPEC_INT = ("pack_size", "case_pack", "pallet_qty")
 SPEC_TEXT = ("notes", "product_dims", "product_weight", "packaging_dims", "packaged_weight",
              "case_dims", "case_weight", "pallet_dims", "pallet_weight")
+# Read-only prices: field -> (region, tier). Shown next to the Hub's five writable ones.
+READ_PRICE_FIELDS = {"map": ("US", "map"), "msrp_ca": ("CA", "msrp"), "msrp_eu": ("EU", "msrp"),
+                     "wholesale_ca": ("CA", "wholesale"), "wholesale_eu": ("EU", "wholesale")}
+ALL_PRICE_FIELDS = {**HUB_PRICE_FIELDS, **READ_PRICE_FIELDS}
+# UK prices are the US numbers in pounds sterling (Ken, 2026-10-27). Derived, so read-only.
+UK_FROM_US = {"msrp_uk": "msrp", "wholesale_uk": "wholesale", "distro_uk": "distro"}
+CURRENCY = {"US": "USD", "CA": "CAD", "EU": "EUR", "UK": "GBP"}
+EXTRA = ("family", "category", "hts_code", "country_of_origin", "producer")
+LINKS = ("cin7_id", "store_url", "asset_url")
 LOCKED = ("name", "brand", "upc", *HUB_PRICE_FIELDS)   # sheet-fed fields: a Hub write wins (see db.hub_value)
 WRITABLE = ("name", "brand", "status", "upc", *HUB_PRICE_FIELDS, *SPEC_INT, *SPEC_TEXT)
-FIELDS = ("sku", "name", "brand", "status", "upc", "msrp", "wholesale", "distro", "distro_eu", "distro_ca",
+def _with_currency(fields):
+    return tuple(x for f in fields for x in (f, f + "_currency"))
+
+
+FIELDS = ("sku", "name", "brand", "status", "upc", *_with_currency(HUB_PRICE_FIELDS),
           "pack_size", "product_dims", "product_weight", "packaging_dims", "packaged_weight",
           "case_pack", "case_dims", "case_weight", "pallet_qty", "pallet_dims", "pallet_weight",
-          "notes", "tier", "updated_at", "updated_by")
+          "notes",
+          # read-only
+          "tier", *EXTRA, *_with_currency((*READ_PRICE_FIELDS, *UK_FROM_US)), *LINKS,
+          "updated_at", "updated_by")
+READ_ONLY = set(FIELDS) - {"sku", *WRITABLE, "updated_at"}
 TIER_STATUS = {1: "active", 2: "deprecated", 3: "obsolete"}
-AUDITED = ("core.sku", "core.sku_spec", "core.price", "core.sku_tier", "core.sku_packaging_level")
+AUDITED = ("core.sku", "core.sku_spec", "core.price", "core.sku_tier", "core.sku_packaging_level",
+           "core.external_id", "core.sku_link")
 EMAIL = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
 MAX_BODY = 64 * 1024
 
@@ -53,17 +73,20 @@ def _error(status, message, fields=None):
 
 _RECORDS = """
 WITH pr AS (
-  SELECT sku_id,
-    max(amount) FILTER (WHERE region = 'US' AND tier = 'msrp'         AND effective_to IS NULL) AS msrp,
-    max(amount) FILTER (WHERE region = 'US' AND tier = 'wholesale'    AND effective_to IS NULL) AS wholesale,
-    max(amount) FILTER (WHERE region = 'US' AND tier = 'distribution' AND effective_to IS NULL) AS distro,
-    max(amount) FILTER (WHERE region = 'EU' AND tier = 'distribution' AND effective_to IS NULL) AS distro_eu,
-    max(amount) FILTER (WHERE region = 'CA' AND tier = 'distribution' AND effective_to IS NULL) AS distro_ca,
+  SELECT sku_id,""" + "".join(f"""
+    max(amount) FILTER (WHERE region = '{r}' AND tier = '{t}' AND effective_to IS NULL) AS {f},"""
+                               for f, (r, t) in ALL_PRICE_FIELDS.items()) + """
     max(updated_at) AS updated_at
   FROM core.price
-  WHERE (region::text, tier::text) IN (('US','msrp'), ('US','wholesale'), ('US','distribution'),
-                                       ('EU','distribution'), ('CA','distribution'))
+  WHERE (region::text, tier::text) IN (""" + ", ".join(f"('{r}','{t}')" for r, t in ALL_PRICE_FIELDS.values()) + """)
   GROUP BY sku_id),
+ext AS (
+  SELECT sku_id, min(external_key) FILTER (WHERE system = 'cin7') AS cin7_id, max(updated_at) AS updated_at
+  FROM core.external_id GROUP BY sku_id),
+lnk AS (
+  SELECT sku_id, min(url) FILTER (WHERE kind = 'store_page') AS store_url,
+    min(url) FILTER (WHERE kind = 'asset_portal') AS asset_url, max(updated_at) AS updated_at
+  FROM core.sku_link GROUP BY sku_id),
 pk AS (
   SELECT sku_id, max(updated_at) AS updated_at,
     jsonb_object_agg(level, jsonb_build_object('l', length_mm, 'w', width_mm, 'h', height_mm, 'g', weight_g,
@@ -73,12 +96,19 @@ SELECT * FROM (
   SELECT s.id, s.code, s.name, b.name AS brand, s.upc, s.pack_type::text AS pack_type, s.pack_qty, s.is_new, t.tier,
     sp.status, sp.notes, sp.pack_size, sp.product_dims, sp.product_weight, sp.packaging_dims, sp.packaged_weight,
     sp.case_pack, sp.case_dims, sp.case_weight, sp.pallet_qty, sp.pallet_dims, sp.pallet_weight,
-    pr.msrp, pr.wholesale, pr.distro, pr.distro_eu, pr.distro_ca, pk.levels, bpk.levels AS base_levels,
-    greatest(s.updated_at, t.updated_at, sp.updated_at, pr.updated_at, pk.updated_at) AS updated_at,
+    """ + ", ".join(f"pr.{f}" for f in ALL_PRICE_FIELDS) + """, pk.levels, bpk.levels AS base_levels,
+    f.name AS family, s.category, s.hts_code, s.country_of_origin, p.name AS producer,
+    ext.cin7_id, lnk.store_url, coalesce(lnk.asset_url, f.asset_portal_url) AS asset_url,
+    greatest(s.updated_at, t.updated_at, sp.updated_at, pr.updated_at, pk.updated_at, ext.updated_at,
+             lnk.updated_at) AS updated_at,
     (SELECT a.actor FROM ops.audit_log a WHERE a.sku_key = s.id::text AND a.table_name = ANY(%(audited)s)
      ORDER BY a.id DESC LIMIT 1) AS updated_by
   FROM core.sku s
   LEFT JOIN core.brand b ON b.id = s.brand_id
+  LEFT JOIN core.family f ON f.id = s.family_id
+  LEFT JOIN core.producer p ON p.id = s.producer_id
+  LEFT JOIN ext ON ext.sku_id = s.id
+  LEFT JOIN lnk ON lnk.sku_id = s.id
   LEFT JOIN core.sku_tier t ON t.sku_id = s.id
   LEFT JOIN core.sku_spec sp ON sp.sku_id = s.id
   LEFT JOIN pr ON pr.sku_id = s.id
@@ -152,7 +182,11 @@ def record(r):
         "sku": r["code"], "name": r["name"], "brand": r["brand"],
         "status": r["status"] or ("draft" if r["is_new"] or r["tier"] is None else TIER_STATUS[r["tier"]]),
         "upc": r["upc"],
-        **{f: _money(r[f]) for f in HUB_PRICE_FIELDS},
+        **{f: _money(r[f]) for f in ALL_PRICE_FIELDS},
+        **{f"{f}_currency": CURRENCY[region] for f, (region, _) in ALL_PRICE_FIELDS.items()},
+        **{uk: _money(r[us]) for uk, us in UK_FROM_US.items()},
+        **{f"{uk}_currency": "GBP" for uk in UK_FROM_US},
+        **{f: r[f] for f in (*EXTRA, *LINKS)},
         "pack_size": _pack_size(r),
         **{f: r[f] if r[f] is not None else d[f] for f in d},
         "notes": r["notes"], "tier": r["tier"], "updated_at": iso(r["updated_at"]), "updated_by": r["updated_by"],
@@ -215,9 +249,11 @@ def validate(conn, body, creating, code=None):
         elif k == "updated_at":
             if creating:
                 errors[k] = "set by the database; don't send it when creating a SKU"
-        elif k in ("updated_by", "tier"):
-            errors[k] = "read-only" + ("; send changed_by instead" if k == "updated_by" else
-                                       ": the tier comes from the price list and Cin7 stock")
+        elif k in READ_ONLY:
+            errors[k] = "read-only" + {"updated_by": "; send changed_by instead",
+                                       "tier": ": the tier comes from the price list and Cin7 stock"}.get(
+                k, ": UK prices follow the US prices" if k.endswith("_uk") else
+                ": set by the price's region" if k.endswith("_currency") else ": comes from the sheets and Cin7")
         elif k not in WRITABLE:
             errors[k] = "unknown field"
         elif k == "name":
@@ -373,9 +409,13 @@ def update(conn, code, body):
 
 # ---------- history
 
-_SKU_COLS = {"code": "sku", "name": "name", "upc": "upc", "brand_id": "brand"}
+_SKU_COLS = {"code": "sku", "name": "name", "upc": "upc", "brand_id": "brand", "family_id": "family",
+             "category": "category", "hts_code": "hts_code", "country_of_origin": "country_of_origin",
+             "producer_id": "producer"}
 _SPEC_COLS = ("status", *SPEC_INT, *SPEC_TEXT)
-_PRICE_FIELD = {v: k for k, v in HUB_PRICE_FIELDS.items()}
+_PRICE_FIELD = {v: k for k, v in ALL_PRICE_FIELDS.items()}
+_UK_OF = {us: uk for uk, us in UK_FROM_US.items()}
+_LINK_FIELD = {"store_page": "store_url", "asset_portal": "asset_url"}
 
 
 def _level_fields(row):
@@ -402,7 +442,9 @@ def changes(conn, since=None, cursor=None, limit=500):
         f"""SELECT a.id, a.table_name, a.action, a.actor, a.at, a.before, a.after, s.code
             FROM ops.audit_log a JOIN core.sku s ON s.id::text = a.sku_key
             WHERE {" AND ".join(where)} ORDER BY a.id LIMIT %s""", (*params, limit)).fetchall()
-    brands = {i: n for i, n in conn.execute("SELECT id, name FROM core.brand")}
+    names = {"brand_id": dict(conn.execute("SELECT id, name FROM core.brand").fetchall()),
+             "family_id": dict(conn.execute("SELECT id, name FROM core.family").fetchall()),
+             "producer_id": dict(conn.execute("SELECT id, name FROM core.producer").fetchall())}
     spec_set = {(str(k), c) for k, *vals in conn.execute(f"SELECT sku_id, {', '.join(_SPEC_COLS)} FROM core.sku_spec")
                 for c, v in zip(_SPEC_COLS, vals) if v is not None}
     out = []
@@ -412,8 +454,8 @@ def changes(conn, since=None, cursor=None, limit=500):
         if r["table_name"] == "core.sku":
             for col, field in _SKU_COLS.items():
                 old, new = before.get(col), after.get(col)
-                if col == "brand_id":
-                    old, new = brands.get(old), brands.get(new)
+                if col in names:
+                    old, new = names[col].get(old), names[col].get(new)
                 pairs.append((field, old, new))
         elif r["table_name"] == "core.sku_spec":
             pairs = [(c, before.get(c), after.get(c)) for c in _SPEC_COLS]
@@ -434,10 +476,19 @@ def changes(conn, since=None, cursor=None, limit=500):
                                             AND id > %s""", (p["sku_id"], p["region"], p["tier"], p["id"])).fetchone()
                 if not successor:      # closed with nothing after it: the price was removed
                     pairs = [(field, _money(before["amount"]), None)]
+        elif r["table_name"] == "core.external_id":
+            p = after or before
+            if p["system"] == "cin7":
+                pairs = [("cin7_id", before.get("external_key"), after.get("external_key"))]
+        elif r["table_name"] == "core.sku_link":
+            p = after or before
+            if p["kind"] in _LINK_FIELD:
+                pairs = [(_LINK_FIELD[p["kind"]], before.get("url"), after.get("url"))]
         elif r["table_name"] == "core.sku_packaging_level":
             old, new = _level_fields(before), _level_fields(after)
             sku_id = (after or before)["sku_id"]   # a value the Hub set hides what the sheets say
             pairs = [(f, old.get(f), new.get(f)) for f in sorted(set(old) | set(new)) if (sku_id, f) not in spec_set]
+        pairs += [(_UK_OF[f], old, new) for f, old, new in pairs if f in _UK_OF and r["table_name"] == "core.price"]
         for field, old, new in pairs:
             if old != new and not (r["table_name"] == "core.sku" and r["action"] == "INSERT" and new is None):
                 out.append({"sku": r["code"], "field": field, "old_value": old, "new_value": new,
@@ -449,7 +500,8 @@ def changes(conn, since=None, cursor=None, limit=500):
 # ---------- HTTP
 
 def _keys():
-    return [k.strip() for k in os.environ.get("MSKU_API_KEYS", "").split(",") if k.strip()]
+    return [os.environ.get(v, "").strip() for v in ("MSKU_API_KEY", "MSKU_API_KEY_PREVIOUS")
+            if os.environ.get(v, "").strip()]
 
 
 def _authorised(environ):
@@ -482,12 +534,18 @@ def _body(environ):
 
 
 def _connect():
-    return psycopg.connect(os.environ.get("MSKU_DATABASE_URL", "postgresql://postgres@/master_sku?host=/tmp&port=5433"))
+    url = os.environ.get("MSKU_API_DATABASE_URL")
+    if not url:
+        # Deliberately no fallback to DATABASE_URL: that's the owner login, which can read costs.
+        raise _error(503, "MSKU_API_DATABASE_URL isn't set. See docs/HUB_API.md, Deploying.")
+    # prepare_threshold=None: Neon's pooled endpoint (PgBouncer) can't keep prepared statements.
+    return psycopg.connect(url, prepare_threshold=None, connect_timeout=10)
 
 
 def route(environ):
     method = environ["REQUEST_METHOD"]
-    path = environ.get("PATH_INFO", "").encode("latin-1").decode("utf-8", "replace").rstrip("/") or "/"
+    path = environ.get("PATH_INFO", "").encode("latin-1").decode("utf-8", "replace")
+    path = re.sub(r"^/api/index(?=/|$)", "", path).rstrip("/") or "/"   # Vercel's rewrite target
     query = {k: v[-1] for k, v in parse_qs(environ.get("QUERY_STRING", "")).items()}
     parts = path.split("/")[1:]
 

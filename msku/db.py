@@ -18,7 +18,9 @@ HUB_PRICE_FIELDS = {"msrp": ("US", "msrp"), "wholesale": ("US", "wholesale"), "d
 
 
 def connect():
-    return psycopg.connect(os.environ.get("MSKU_DATABASE_URL", "postgresql://postgres@/master_sku?host=/tmp&port=5433"))
+    # DATABASE_URL is what Vercel's Neon integration sets: the owner login, for migrate / sync / hub-login only.
+    url = os.environ.get("MSKU_DATABASE_URL") or os.environ.get("DATABASE_URL")
+    return psycopg.connect(url or "postgresql://postgres@/master_sku?host=/tmp&port=5433", prepare_threshold=None)
 
 
 def migrate(conn):
@@ -356,3 +358,23 @@ def resolve(conn, fingerprint, value, actor, note=None, source=None):
                      (fingerprint, value, source, note, row[0], actor))
         conn.execute("UPDATE ops.conflict SET status = 'resolved' WHERE fingerprint = %s", (fingerprint,))
     conn.commit()
+
+
+HUB_LOGIN = "msku_hub_api_login"
+
+
+def hub_login(conn, owner_url):
+    """Create the Hub API's database login (or give it a new password) and return its connection URL.
+    It's a member of msku_hub_api only: SKU data and the audit trail, never the cost schema."""
+    import secrets
+    from urllib.parse import quote, urlsplit, urlunsplit
+    from psycopg import sql
+    password = secrets.token_urlsafe(32)
+    with conn.transaction():
+        exists = conn.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (HUB_LOGIN,)).fetchone()
+        verb = "ALTER ROLE {} LOGIN PASSWORD {}" if exists else "CREATE ROLE {} LOGIN PASSWORD {} IN ROLE msku_hub_api"
+        conn.execute(sql.SQL(verb).format(sql.Identifier(HUB_LOGIN), sql.Literal(password)))
+    conn.commit()
+    u = urlsplit(owner_url)
+    host = u.netloc.rsplit("@", 1)[-1]
+    return urlunsplit((u.scheme, f"{HUB_LOGIN}:{quote(password, safe='')}@{host}", u.path, u.query, u.fragment))

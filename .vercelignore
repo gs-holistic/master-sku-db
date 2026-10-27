@@ -1,0 +1,8 @@
+tests
+docs
+scripts
+migrations
+.github
+*.html
+*.patch
+*.bundle

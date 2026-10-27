@@ -1,4 +1,2 @@
-google-auth>=2.30
-google-api-python-client>=2.130
+# What the Hub API needs at runtime. Vercel installs this file, so keep it small.
 psycopg[binary]>=3.2
-pytest>=8.0

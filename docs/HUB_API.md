@@ -3,8 +3,8 @@
 Server-to-server JSON API that lets the G Pen Hub (gpen-crm.vercel.app) read and write the master SKU database.
 Code: `msku/hub_api.py`. Tests: `tests/test_hub_api.py`.
 
-**Base URL:** not assigned yet. It's whatever host Jordan deploys this to (see [Deploying](#deploying)), e.g.
-`https://master-sku-api.example.com`. Every path below goes after it.
+**Base URL:** `https://<project>.vercel.app` once the Vercel project is deployed (see [Deploying](#deploying)).
+Every path below goes after it.
 
 ## Authentication
 
@@ -12,21 +12,24 @@ Code: `msku/hub_api.py`. Tests: `tests/test_hub_api.py`.
 - HTTPS only. A plain-HTTP request gets `403` (judged from `X-Forwarded-Proto`, which every HTTPS host sets).
 - No CORS and no browser login: the Hub calls this from its server, with the key kept in the Hub's server-side env.
 
-**Keys** live only in the host's secret store, in `MSKU_API_KEYS` (comma-separated). They're never in code or chat.
+**The key** lives only in Vercel's environment variables (`MSKU_API_KEY`) and the Hub's server-side env. It's never
+in code, chat, Slack or email.
 
-- Make one: `python -m msku new-api-key` prints a random 64-character key. Paste it straight into the API host's
-  `MSKU_API_KEYS` and the Hub's env (e.g. `MASTER_SKU_API_KEY`), and nowhere else.
+- Make one: `python3 -c "import secrets; print(secrets.token_urlsafe(48))"`, which prints a random 64-character key.
+  (`python -m msku new-api-key` does the same inside the repo.)
 - **Rotate** without downtime:
-  1. Set `MSKU_API_KEYS=<new>,<old>` on the API.
-  2. Put `<new>` in the Hub and redeploy it.
-  3. Set `MSKU_API_KEYS=<new>`.
+  1. Move the current key to `MSKU_API_KEY_PREVIOUS`, put the new one in `MSKU_API_KEY`, and redeploy.
+  2. Update the Hub.
+  3. Delete `MSKU_API_KEY_PREVIOUS` and redeploy.
 
 ## Conventions
 
 - JSON in and out, UTF-8. Errors are `{"error": "...", "fields": {"<field>": "<what's wrong>"}}`.
 - Timestamps are ISO 8601 in UTC with milliseconds: `2026-10-26T18:04:05.123Z`.
-- Money is a plain number (`49.95`). `msrp`, `wholesale` and `distro` are USD. **`distro_eu` is EUR and `distro_ca`
-  is CAD**: that's how the price list holds them, and nothing is converted.
+- Money is a plain number (`49.95`). **Every price has a `<price>_currency` field right after it**: `USD`, `CAD`,
+  `EUR` or `GBP`. CA and EU prices are as the price list holds them; nothing is converted.
+- **UK prices** (`msrp_uk`, `wholesale_uk`, `distro_uk`) are the US numbers in GBP (Ken, 2026-10-27). They follow
+  the US prices and are read-only.
 - Quantities are whole numbers. Dimensions and weights are text with units (`"4.5 x 2 x 1 in"`, `"3.2 oz"`). Values
   that come from the sheets are shown in mm, g and kg.
 - Nothing is deleted. To retire a SKU, set `"status": "obsolete"`.
@@ -72,14 +75,23 @@ curl -H "x-api-key: $KEY" "https://<base>/skus/GPM-001-APZZ-Inner%20Pack"
   "brand": "G Pen",
   "status": "active",
   "upc": "10811736020340",
-  "msrp": 499.5, "wholesale": 300.0, "distro": 255.0, "distro_eu": 255.0, "distro_ca": 357.0,
+  "msrp": 499.5, "msrp_currency": "USD", "wholesale": 300.0, "wholesale_currency": "USD",
+  "distro": 255.0, "distro_currency": "USD", "distro_eu": 255.0, "distro_eu_currency": "EUR",
+  "distro_ca": 357.0, "distro_ca_currency": "CAD",
   "pack_size": 10,
   "product_dims": "145 x 107.5 x 73 mm", "product_weight": "1.007 kg",
   "packaging_dims": null, "packaged_weight": null,
   "case_pack": 160, "case_dims": "325 x 305 x 235 mm", "case_weight": "16.8 kg",
   "pallet_qty": null, "pallet_dims": null, "pallet_weight": null,
   "notes": null,
-  "tier": 1,
+  "tier": 1, "family": "Micro II", "category": "Micro Ii", "hts_code": "8543.70.9940", "country_of_origin": null,
+  "producer": null,
+  "map": null, "map_currency": "USD",
+  "msrp_ca": 699.5, "msrp_ca_currency": "CAD", "msrp_eu": 499.5, "msrp_eu_currency": "EUR",
+  "wholesale_ca": 420.0, "wholesale_ca_currency": "CAD", "wholesale_eu": 300.0, "wholesale_eu_currency": "EUR",
+  "msrp_uk": 499.5, "msrp_uk_currency": "GBP", "wholesale_uk": 300.0, "wholesale_uk_currency": "GBP",
+  "distro_uk": 255.0, "distro_uk_currency": "GBP",
+  "cin7_id": "GPM-001-APZZ-Inner Pack", "store_url": null, "asset_url": null,
   "updated_at": "2026-10-22T23:05:05.315Z",
   "updated_by": "ken"
 }
@@ -170,7 +182,7 @@ curl -H "x-api-key: $KEY" "https://<base>/changes?since=2026-10-26T00:00:00Z"
 | `msrp`, `wholesale`, `distro`, `distro_eu`, `distro_ca` | Number from 0 to 1,000,000, at most 2 decimals, or `null` |
 | `pack_size`, `case_pack`, `pallet_qty` | Whole number, or `null` |
 | dims, weights | Text up to 100 characters; `notes` up to 5,000 |
-| `tier`, `updated_by` | Read-only |
+| `tier`, `updated_by`, every `_currency`, and the read-only fields below | Read-only (`400` if sent) |
 
 ## Where each field comes from
 
@@ -184,7 +196,14 @@ curl -H "x-api-key: $KEY" "https://<base>/changes?since=2026-10-26T00:00:00Z"
 | `product_dims` / `product_weight`, `packaging_dims` / `packaged_weight` | the Hub's value; else the sheets' "unit" measurements (see the note below) | `core.sku_spec` |
 | `case_*`, `pallet_*` | the Hub's value; else the master case and pallet rows from the sheets | `core.sku_spec` |
 | `notes` | the Hub's value | `core.sku_spec` |
-| `tier` (extra) | price list and Cin7 stock (read-only) | — |
+| `tier` | price list and Cin7 stock | read-only |
+| `family`, `category`, `hts_code`, `country_of_origin`, `producer` | the sheets | read-only |
+| `map` | current US MAP (only the 5 Gravity Infuser V3 SKUs have one) | read-only |
+| `msrp_ca`, `wholesale_ca` / `msrp_eu`, `wholesale_eu` | current CA (CAD) / EU (EUR) prices | read-only |
+| `msrp_uk`, `wholesale_uk`, `distro_uk` | the US numbers, in GBP | read-only |
+| `cin7_id` | the SKU as Cin7 knows it (Cin7 exports identify products by SKU); `null` if not in Cin7 | read-only |
+| `store_url`, `asset_url` | store page and asset portal links. **No source supplies them yet, so they're `null`** | read-only |
+| `<price>_currency` | the price's region: USD, CAD, EUR, GBP | read-only |
 | `updated_at` | the latest change to any of the above | — |
 | `updated_by` | who made that change | — |
 
@@ -200,27 +219,37 @@ that log.
 
 ## Deploying
 
-What's needed, all chosen by Jordan:
+Hosted on Vercel (team grenco-medical) with Neon Postgres. `vercel.json` sends every path to `api/index.py`, which
+serves the WSGI `app`. Vercel installs `requirements.txt` (just the database driver). The sheet sync and the tests
+use `requirements-dev.txt`.
 
-1. **A permanent Postgres 16** (Neon, RDS, Cloud SQL...). Apply the migrations and load the data:
-   ```
-   export MSKU_DATABASE_URL=postgresql://...
-   python -m msku migrate
-   python -m msku sync        # needs GOOGLE_SERVICE_ACCOUNT_JSON; see docs/HOSTING.md
-   ```
-   Then point the daily sync (`.github/workflows/sync.yml`, secret `MSKU_DATABASE_URL`) at the same database, so it
-   updates the data in place instead of rebuilding it.
-2. **A database login for the API** that has only the API's rights. It can't see costs:
-   ```sql
-   CREATE ROLE hub_api LOGIN PASSWORD '<generated>' IN ROLE msku_hub_api;
-   ```
-3. **A host that serves HTTPS** and runs a Python WSGI app. The entry point is `wsgi.py` (`app`). For example:
-   `pip install -r requirements.txt gunicorn` then `gunicorn wsgi:app` on Render, Fly.io, Cloud Run or Railway.
-   Vercel's Python runtime also runs WSGI apps, if Jordan wants it next to the Hub.
-4. **Secrets on the host:**
-   - `MSKU_DATABASE_URL`: the `hub_api` login from step 2, with `sslmode=require`.
-   - `MSKU_API_KEYS`: from `python -m msku new-api-key`.
-5. **On the Hub:** the base URL, and the same key in a server-side env var.
+**Two database logins:**
 
-**Local development:** `MSKU_API_KEYS=dev python -m msku serve` runs the API on `http://localhost:8080` over plain
-HTTP. It's for development only; never expose it.
+| Env var | Login | Used by |
+|---|---|---|
+| `DATABASE_URL` | Neon's owner login, set by Vercel's Neon integration | `migrate`, `sync`, `hub-login` only. The API never uses it |
+| `MSKU_API_DATABASE_URL` | `msku_hub_api_login`, a member of `msku_hub_api`: SKU data and the audit log, no cost schema | the API. It returns `503` if this isn't set, rather than falling back to the owner |
+
+**Environment variables on the Vercel project:**
+
+- `DATABASE_URL`: set by the Neon integration.
+- `MSKU_API_DATABASE_URL`: printed by `python -m msku hub-login`.
+- `MSKU_API_KEY`: the Hub's key.
+- `MSKU_API_KEY_PREVIOUS`: optional, used only while rotating.
+
+**One-time setup** (from a computer with the repo, Python 3.11+ and the Vercel CLI):
+
+```
+git clone https://github.com/gs-holistic/master-sku-db && cd master-sku-db
+python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
+vercel link                      # pick team grenco-medical, project master-sku-db
+vercel env pull .env.local       # writes DATABASE_URL locally; .env* is git-ignored
+set -a && . ./.env.local && set +a
+.venv/bin/python -m msku migrate
+.venv/bin/python -m msku hub-login   # prints MSKU_API_DATABASE_URL: paste it into Vercel, never into chat
+```
+
+Then load the data with `python -m msku sync`. It needs the Google service account key; see docs/HOSTING.md.
+
+**Local development:** `MSKU_API_KEY=dev python -m msku serve` runs the API on `http://localhost:8080` over plain
+HTTP, against the local database. It's for development only; never expose it.

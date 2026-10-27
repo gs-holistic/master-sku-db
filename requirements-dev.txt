@@ -1,0 +1,5 @@
+# Everything else: the sheet sync (Google APIs) and the tests.
+-r requirements.txt
+google-auth>=2.30
+google-api-python-client>=2.130
+pytest>=8.0
